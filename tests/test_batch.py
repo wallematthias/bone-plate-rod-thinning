@@ -1,8 +1,10 @@
+from dataclasses import replace
 from pathlib import Path
 import subprocess
 import sys
 
 import numpy as np
+import pytest
 
 from bone_imaging_derivatives import DerivativeManifest, DerivativeRecord, read_manifest, write_manifest
 
@@ -43,6 +45,12 @@ def _write_segmentation_manifest(dataset_root: Path, *, bone_path: Path, common_
         ),
         dataset_root / "derivatives" / "Segmentation" / "manifest.json",
     )
+
+
+def _tiny_bone() -> np.ndarray:
+    bone = np.zeros((5, 5, 5), dtype=bool)
+    bone[2, 2, 1:4] = True
+    return bone
 
 
 def test_run_plate_rod_batch_discovers_manifest_masks_and_writes_derivative_outputs(tmp_path: Path) -> None:
@@ -129,3 +137,101 @@ def test_cli_run_batch_writes_plate_rod_manifest(tmp_path: Path) -> None:
 
     assert "BONE_DERIVATIVES_PROGRESS" in completed.stdout
     assert (tmp_path / "derivatives" / "PlateRodMorphometry" / "manifest.json").exists()
+
+
+def test_run_plate_rod_batch_prefers_trabecular_mask_over_bone_segmentation_for_one_case(tmp_path: Path) -> None:
+    from plate_rod_thinning.batch import run_plate_rod_batch
+    from plate_rod_thinning.pipeline import PlateRodParameters
+
+    trab_path = tmp_path / "inputs" / "trab.npy"
+    bone_path = tmp_path / "inputs" / "bone.npy"
+    trab_path.parent.mkdir(parents=True)
+    np.save(trab_path, _tiny_bone())
+    np.save(bone_path, _tiny_bone())
+    trab = DerivativeRecord("Segmentation", "trabecular_mask", "SAMPLE001", "tibia", "1", None, "native", trab_path, "provided")
+    bone = DerivativeRecord("Segmentation", "bone_segmentation", "SAMPLE001", "tibia", "1", None, "native", bone_path, "provided")
+    write_manifest(
+        DerivativeManifest.create("Segmentation", tmp_path, {"name": "fixture", "version": "1"}, (trab, bone)),
+        tmp_path / "derivatives" / "Segmentation" / "manifest.json",
+    )
+
+    result = run_plate_rod_batch(tmp_path, parameters=PlateRodParameters(skeletonize=False))
+
+    assert len(result.records) == 3
+    assert len({record.record_id for record in result.records}) == 3
+    assert len({record.path for record in result.records}) == 3
+    assert {record.inputs for record in result.records} == {(trab.record_id,)}
+
+
+def test_run_plate_rod_batch_writes_all_artifacts_under_external_output_root(tmp_path: Path) -> None:
+    from plate_rod_thinning.batch import run_plate_rod_batch
+    from plate_rod_thinning.pipeline import PlateRodParameters
+
+    bone_path = tmp_path / "inputs" / "trab.npy"
+    bone_path.parent.mkdir(parents=True)
+    np.save(bone_path, _tiny_bone())
+    _write_segmentation_manifest(tmp_path, bone_path=bone_path)
+    output_root = tmp_path.parent / "external-plate-rod-output"
+
+    result = run_plate_rod_batch(tmp_path, output_root=output_root, parameters=PlateRodParameters(skeletonize=False))
+
+    assert (output_root / "manifest.json").exists()
+    assert all(record.path.is_relative_to(output_root) and record.path.exists() for record in result.records)
+
+
+def test_run_plate_rod_batch_reuses_compatible_outputs_and_preserves_unrelated_records(tmp_path: Path) -> None:
+    from plate_rod_thinning.batch import run_plate_rod_batch
+    from plate_rod_thinning.pipeline import PlateRodParameters
+
+    bone_path = tmp_path / "inputs" / "trab.npy"
+    bone_path.parent.mkdir(parents=True)
+    np.save(bone_path, _tiny_bone())
+    _write_segmentation_manifest(tmp_path, bone_path=bone_path)
+    parameters = PlateRodParameters(skeletonize=False)
+    first = run_plate_rod_batch(tmp_path, parameters=parameters)
+    label = next(record for record in first.records if record.role == "plate_rod_label_map")
+    label.path.touch()
+    old_time_ns = 1_000_000_000
+    import os
+    os.utime(label.path, ns=(old_time_ns, old_time_ns))
+    manifest_path = tmp_path / "derivatives" / "PlateRodMorphometry" / "manifest.json"
+    first_manifest = read_manifest(manifest_path)
+    unrelated_path = tmp_path / "derivatives" / "PlateRodMorphometry" / "sub-OTHER" / "site-radius" / "other.csv"
+    unrelated_path.parent.mkdir(parents=True)
+    unrelated_path.write_text("metric,value\n", encoding="utf-8")
+    unrelated = DerivativeRecord("PlateRodMorphometry", "plate_rod_measurements_table", "OTHER", "radius", "1", None, "table", unrelated_path, "generated")
+    write_manifest(replace(first_manifest, records=(*first_manifest.records, unrelated)), manifest_path)
+
+    second = run_plate_rod_batch(tmp_path, parameters=parameters)
+
+    assert label.path.stat().st_mtime_ns == old_time_ns
+    assert unrelated.record_id in {record.record_id for record in second.records}
+
+
+def test_run_plate_rod_batch_force_recomputes_existing_outputs(tmp_path: Path) -> None:
+    from plate_rod_thinning.batch import run_plate_rod_batch
+    from plate_rod_thinning.pipeline import PlateRodParameters
+
+    bone_path = tmp_path / "inputs" / "trab.npy"
+    bone_path.parent.mkdir(parents=True)
+    np.save(bone_path, _tiny_bone())
+    _write_segmentation_manifest(tmp_path, bone_path=bone_path)
+    parameters = PlateRodParameters(skeletonize=False)
+    first = run_plate_rod_batch(tmp_path, parameters=parameters)
+    label = next(record for record in first.records if record.role == "plate_rod_label_map")
+    old_time_ns = 1_000_000_000
+    import os
+    os.utime(label.path, ns=(old_time_ns, old_time_ns))
+
+    run_plate_rod_batch(tmp_path, parameters=parameters, force=True)
+
+    assert label.path.stat().st_mtime_ns != old_time_ns
+
+
+def test_run_plate_rod_batch_rejects_empty_dataset_without_writing_manifest(tmp_path: Path) -> None:
+    from plate_rod_thinning.batch import run_plate_rod_batch
+
+    with pytest.raises(ValueError, match="No trabecular or bone masks"):
+        run_plate_rod_batch(tmp_path)
+
+    assert not (tmp_path / "derivatives" / "PlateRodMorphometry" / "manifest.json").exists()

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import csv
+from dataclasses import asdict, dataclass
+from hashlib import sha256
+import json
 import re
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +17,7 @@ from bone_imaging_derivatives import (
     DerivativeRecord,
     discover_manifests,
     find_records,
+    read_manifest,
     write_manifest,
 )
 from bone_imaging_derivatives.layout import record_output_path
@@ -67,13 +70,24 @@ def run_plate_rod_batch(
     Unmanifested ``.npy`` trabecular/bone masks are supported as a small,
     portable fallback for command-line fixtures and simple datasets.
     """
-    del generate_missing, force
+    del generate_missing
     root = Path(dataset_root).resolve()
     destination = Path(output_root).resolve() if output_root is not None else root / "derivatives" / _FAMILY
     known_manifests = list(discover_manifests(root) if manifests is None else manifests)
+    existing_manifest = _read_existing_manifest(destination)
     inputs = _discover_inputs(root, known_manifests, subject_id=subject_id, site=site, use_common_region=use_common_region)
+    if not inputs:
+        raise ValueError("No trabecular or bone masks were found for plate/rod analysis")
+    settings_hash = _settings_hash(parameters, use_common_region=use_common_region)
     records: list[DerivativeRecord] = []
+    active_cases = {_case_key(item.bone) for item in inputs}
     for item in inputs:
+        expected_records = _output_records(root, destination, item.bone, item.common_region, settings_hash)
+        reusable = _compatible_records(existing_manifest, expected_records)
+        if reusable is not None and not force:
+            records.extend(reusable)
+            _emit(progress, item.bone, "measure", "reused", "Reused compatible plate/rod derivative outputs")
+            continue
         _emit(progress, item.bone, "measure", "started", "Running plate/rod morphometry")
         bone = _load_mask(item.bone.path)
         common = _load_mask(item.common_region.path) if item.common_region is not None else None
@@ -83,21 +97,26 @@ def run_plate_rod_batch(
         # input, not merely downstream summary denominators.
         effective_bone = bone if common is None else bone & common
         result = plate_rod_analysis(effective_bone, analysis_mask=common, parameters=parameters)
-        case_records = _output_records(root, item.bone, item.common_region)
         if not dry_run:
-            _write_outputs(case_records, result)
-        records.extend(case_records)
+            _write_outputs(expected_records, result)
+        records.extend(expected_records)
         _emit(progress, item.bone, "measure", "completed", "Wrote plate/rod derivative outputs")
+
+    preserved = tuple(
+        record for record in (existing_manifest.records if existing_manifest is not None else ())
+        if not (record.derivative == _FAMILY and _case_key(record) in active_cases and record.role in _OUTPUT_ROLES)
+    )
+    all_records = (*preserved, *records)
 
     manifest = DerivativeManifest.create(
         _FAMILY,
         root,
         {"name": "plate-rod-thinning", "version": "0.1.3"},
-        tuple(records),
+        all_records,
     )
     if not dry_run:
         write_manifest(manifest, destination / "manifest.json")
-    return BatchWorkflowResult(manifest=manifest, records=tuple(records), output_root=destination)
+    return BatchWorkflowResult(manifest=manifest, records=all_records, output_root=destination)
 
 
 def _discover_inputs(
@@ -108,11 +127,11 @@ def _discover_inputs(
     site: str | None,
     use_common_region: bool,
 ) -> list[_BatchInput]:
-    masks = [
-        record
-        for role in _MASK_ROLES
-        for record in find_records(manifests, role=role, subject_id=subject_id, site=site, space="native")
-    ]
+    masks_by_case: dict[tuple[str, str, str | None, int | None], DerivativeRecord] = {}
+    for role in _MASK_ROLES:
+        for record in find_records(manifests, role=role, subject_id=subject_id, site=site, space="native"):
+            masks_by_case.setdefault(_case_key(record), record)
+    masks = list(masks_by_case.values())
     if not masks:
         masks = _filename_fallback(root, subject_id=subject_id, site=site)
     common_regions = find_records(
@@ -124,12 +143,7 @@ def _discover_inputs(
         space="native",
     )
     inputs: list[_BatchInput] = []
-    seen: set[tuple[str, str, str | None, str]] = set()
     for mask in masks:
-        key = (mask.subject_id, mask.site, mask.session_id, str(mask.path))
-        if key in seen:
-            continue
-        seen.add(key)
         common = next(
             (record for record in common_regions if _same_case(record, mask)), None
         ) if use_common_region else None
@@ -158,9 +172,11 @@ def _filename_fallback(root: Path, *, subject_id: str | None, site: str | None) 
 
 
 def _same_case(left: DerivativeRecord, right: DerivativeRecord) -> bool:
-    return (left.subject_id, left.site, left.session_id, left.stack_index) == (
-        right.subject_id, right.site, right.session_id, right.stack_index
-    )
+    return _case_key(left) == _case_key(right)
+
+
+def _case_key(record: DerivativeRecord) -> tuple[str, str, str | None, int | None]:
+    return record.subject_id, record.site, record.session_id, record.stack_index
 
 
 def _load_mask(path: Path) -> np.ndarray:
@@ -171,23 +187,72 @@ def _load_mask(path: Path) -> np.ndarray:
 
 def _output_records(
     root: Path,
+    destination: Path,
     input_record: DerivativeRecord,
     common_record: DerivativeRecord | None,
+    settings_hash: str,
 ) -> tuple[DerivativeRecord, ...]:
     subject, case_site, session = input_record.subject_id, input_record.site, input_record.session_id
     session_part = f"ses-{session}" if session is not None else "ses-none"
     base_parts = ("native_space", session_part)
     inputs = (input_record.record_id,) + ((common_record.record_id,) if common_record is not None else ())
-    label_path = record_output_path(root, _FAMILY, subject, case_site, *base_parts, "maps", f"sub-{subject}_{session_part}_site-{case_site}_desc-plate-rod-label.npy")
-    skeleton_path = record_output_path(root, _FAMILY, subject, case_site, *base_parts, "maps", f"sub-{subject}_{session_part}_site-{case_site}_desc-skeleton.npy")
-    table_path = record_output_path(root, _FAMILY, subject, case_site, *base_parts, "tables", f"sub-{subject}_{session_part}_site-{case_site}_desc-plate-rod-measurements.csv")
+    label_path = _artifact_path(root, destination, subject, case_site, *base_parts, "maps", f"sub-{subject}_{session_part}_site-{case_site}_desc-plate-rod-label.npy")
+    skeleton_path = _artifact_path(root, destination, subject, case_site, *base_parts, "maps", f"sub-{subject}_{session_part}_site-{case_site}_desc-skeleton.npy")
+    table_path = _artifact_path(root, destination, subject, case_site, *base_parts, "tables", f"sub-{subject}_{session_part}_site-{case_site}_desc-plate-rod-measurements.csv")
     common = dict(subject_id=subject, site=case_site, session_id=session, stack_index=input_record.stack_index,
-                  space="native", source="generated", inputs=inputs)
+                  space="native", source="generated", inputs=inputs, settings_hash=settings_hash)
     return (
         DerivativeRecord(derivative=_FAMILY, role="plate_rod_label_map", path=label_path, content_type="image", **common),
         DerivativeRecord(derivative=_FAMILY, role="skeleton_map", path=skeleton_path, content_type="image", **common),
         DerivativeRecord(derivative=_FAMILY, role="plate_rod_measurements_table", path=table_path, space="table", content_type="table", **{key: value for key, value in common.items() if key != "space"}),
     )
+
+
+_OUTPUT_ROLES = frozenset({"plate_rod_label_map", "skeleton_map", "plate_rod_measurements_table"})
+
+
+def _artifact_path(root: Path, destination: Path, subject: str, site: str, *parts: str) -> Path:
+    default_destination = root / "derivatives" / _FAMILY
+    if destination == default_destination:
+        return record_output_path(root, _FAMILY, subject, site, *parts)
+    return destination / f"sub-{subject}" / f"site-{site}" / Path(*parts)
+
+
+def _read_existing_manifest(destination: Path) -> DerivativeManifest | None:
+    path = destination / "manifest.json"
+    return read_manifest(path) if path.exists() else None
+
+
+def _settings_hash(parameters: PlateRodParameters | None, *, use_common_region: bool) -> str:
+    payload = {"parameters": asdict(parameters or PlateRodParameters()), "use_common_region": use_common_region}
+    return sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _compatible_records(
+    existing_manifest: DerivativeManifest | None,
+    expected_records: Sequence[DerivativeRecord],
+) -> tuple[DerivativeRecord, ...] | None:
+    if existing_manifest is None:
+        return None
+    records: list[DerivativeRecord] = []
+    for expected in expected_records:
+        record = next(
+            (
+                candidate for candidate in existing_manifest.records
+                if candidate.derivative == _FAMILY
+                and candidate.role == expected.role
+                and _same_case(candidate, expected)
+                and candidate.inputs == expected.inputs
+                and candidate.settings_hash == expected.settings_hash
+                and candidate.path == expected.path
+                and candidate.path.exists()
+            ),
+            None,
+        )
+        if record is None:
+            return None
+        records.append(record)
+    return tuple(records)
 
 
 def _write_outputs(records: Sequence[DerivativeRecord], result: object) -> None:
