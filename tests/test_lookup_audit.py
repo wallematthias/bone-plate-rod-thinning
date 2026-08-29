@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from plate_rod_thinning.lookup_audit import (
     CLASS_EFFECTIVE_POINT_COUNTS,
@@ -8,6 +9,11 @@ from plate_rod_thinning.lookup_audit import (
     audit_lookup_tables,
     classify_spoint_configuration,
     load_lookup_tables,
+)
+
+pytestmark = pytest.mark.skipif(
+    not MATLAB_ROOT.exists(),
+    reason="MATLAB source lookup tables are local audit data and are not available in CI",
 )
 
 

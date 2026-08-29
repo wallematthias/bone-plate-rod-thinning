@@ -1,7 +1,8 @@
 import numpy as np
+import pytest
 
 import plate_rod_thinning.topology as topology
-from plate_rod_thinning.lookup_audit import load_lookup_tables
+from plate_rod_thinning.lookup_audit import MATLAB_ROOT, load_lookup_tables
 from plate_rod_thinning.topology import (
     BASE_SPOINTS_BY_CLASS,
     MATLAB_SPOINTS,
@@ -27,6 +28,11 @@ from plate_rod_thinning.topology import (
     shape_preserving_point,
     subscript_to_linear,
     tunnel_preserving_e_point,
+)
+
+requires_matlab_lookup_tables = pytest.mark.skipif(
+    not MATLAB_ROOT.exists(),
+    reason="MATLAB source lookup tables are local audit data and are not available in CI",
 )
 
 
@@ -165,6 +171,7 @@ def test_final_erosion_point_ports_saha_conditions_4_to_6_reference_case():
     assert final_erosion_point(config)
 
 
+@requires_matlab_lookup_tables
 def test_generated_classification_lookup_matches_matlab_for_classes_0_to_8():
     matlab = load_lookup_tables("classification")
 
@@ -174,6 +181,7 @@ def test_generated_classification_lookup_matches_matlab_for_classes_0_to_8():
         assert np.array_equal(generated, matlab[class_id].astype(np.int64))
 
 
+@requires_matlab_lookup_tables
 def test_generated_simple_point_lookup_matches_matlab_for_classes_0_to_8():
     matlab = load_lookup_tables("thinning")
 
