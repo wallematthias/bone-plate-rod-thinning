@@ -9,9 +9,13 @@ description = "Topology-preserving trabecular bone plate/rod skeletonization and
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "bone-imaging-derivatives",
   "numpy",
   "scipy",
 ]
+
+[project.scripts]
+plate-rod-thinning = "plate_rod_thinning.cli:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
