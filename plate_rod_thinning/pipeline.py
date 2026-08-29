@@ -29,7 +29,9 @@ class PlateRodParameters:
 
     slenderness: int = 0
     min_plate_voxels: int = 0
-    min_rod_voxels: int = 3
+    min_rod_voxels: int = 5
+    junction_dilation_voxels: int = 2
+    junction_support_radius_voxels: int | None = None
     skeletonize: bool = True
     crop_to_mask: bool = True
     max_iterations: int = 200
@@ -108,11 +110,6 @@ def plate_rod_analysis(
     skeleton_labels = plate_rod_labels_from_topology(topology_classes)
     for _ in range(params.slenderness):
         skeleton_labels = _reduce_slender_plate_edges(skeleton_labels)
-    skeleton_labels = _remove_small_classes(
-        skeleton_labels,
-        min_plate_voxels=params.min_plate_voxels,
-        min_rod_voxels=params.min_rod_voxels,
-    )
     full_labels = label_full_thickness(bone_mask, skeleton_labels)
     its = compute_its_morphometry(
         full_labels=full_labels,
@@ -120,6 +117,10 @@ def plate_rod_analysis(
         topology_classes=topology_classes,
         analysis_mask=tissue_mask,
         voxel_spacing_mm=params.voxel_spacing_mm,
+        junction_dilation_voxels=params.junction_dilation_voxels,
+        min_plate_voxels=params.min_plate_voxels,
+        min_rod_voxels=params.min_rod_voxels,
+        junction_support_radius_voxels=params.junction_support_radius_voxels,
     )
     _, components = component_summary(skeleton_labels > 0)
     bone_voxels = int(bone_mask.sum())
@@ -146,6 +147,12 @@ def plate_rod_analysis(
         "component_count_26_connected": int(components.component_count),
         "largest_component_voxels": int(components.largest_components[0]) if components.largest_components else 0,
         "slenderness": int(params.slenderness),
+        "junction_dilation_voxels": int(params.junction_dilation_voxels),
+        "junction_support_radius_voxels": -1
+        if params.junction_support_radius_voxels is None
+        else int(params.junction_support_radius_voxels),
+        "min_plate_voxels": int(params.min_plate_voxels),
+        "min_rod_voxels": int(params.min_rod_voxels),
         "max_iterations": int(params.max_iterations),
     })
     summary.update(its.summary)

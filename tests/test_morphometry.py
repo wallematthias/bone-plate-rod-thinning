@@ -108,6 +108,75 @@ def test_compute_its_morphometry_preserves_original_topology_junction_types():
     assert result.summary["R-R Junc.D"] == pytest.approx(1 / full_labels.size)
 
 
+def test_compute_its_morphometry_splits_components_by_dilated_junction_zones():
+    skeleton_labels = np.zeros((5, 7, 5), dtype=np.uint8)
+    topology_classes = np.zeros_like(skeleton_labels)
+    skeleton_labels[2, 1:6, 2] = 1
+    skeleton_labels[2, 3, 2] = 3
+    topology_classes[2, 1:3, 2] = 2
+    topology_classes[2, 3, 2] = SURFACE_SURFACE_JUNCTION
+    topology_classes[2, 4:6, 2] = 2
+
+    full_labels = np.zeros_like(skeleton_labels)
+    full_labels[2, 1:6, 2] = 1
+    analysis_mask = np.ones_like(full_labels, dtype=bool)
+
+    result = compute_its_morphometry(
+        full_labels=full_labels,
+        skeleton_labels=skeleton_labels,
+        topology_classes=topology_classes,
+        analysis_mask=analysis_mask,
+        voxel_spacing_mm=(1.0, 1.0, 1.0),
+        junction_dilation_voxels=1,
+    )
+
+    assert result.summary["plate_count"] == 2
+    assert result.summary["P-P Junc.D"] == pytest.approx(1 / full_labels.size)
+    assert sorted(np.unique(result.component_labels[full_labels > 0]).tolist()) == [1, 2]
+
+
+def test_skeleton_graph_elements_uses_matlab_style_minimum_component_sizes_after_junction_removal():
+    labels = np.zeros((5, 9, 5), dtype=np.uint8)
+    topology_classes = np.zeros_like(labels)
+    labels[2, 1:4, 2] = 2
+    topology_classes[2, 1:4, 2] = 6
+    labels[2, 5:9, 2] = 1
+    topology_classes[2, 5:9, 2] = 2
+
+    element_labels, element_types, _, _ = morphometry._skeleton_graph_elements(
+        labels,
+        topology_classes,
+        min_plate_voxels=4,
+        min_rod_voxels=4,
+    )
+
+    assert np.count_nonzero(element_types == 1) == 1
+    assert np.count_nonzero(element_types == 2) == 0
+    assert np.count_nonzero(element_labels) == 4
+
+
+def test_component_neighbor_pair_junctions_require_matching_topology_support_when_provided():
+    component_labels = np.zeros((3, 7, 3), dtype=np.int32)
+    component_labels[1, 1:3, 1] = 1
+    component_labels[1, 3:5, 1] = 2
+    component_labels[1, 5, 1] = 1
+    component_labels[1, 6, 1] = 2
+    element_types = np.asarray([0, 1, 2], dtype=np.uint8)
+    topology_classes = np.zeros_like(component_labels, dtype=np.uint8)
+    topology_classes[1, 3, 1] = SURFACE_CURVE_JUNCTION
+
+    junctions = morphometry._component_neighbor_pair_junctions(
+        component_labels,
+        element_types,
+        voxel_volume=1.0,
+        topology_classes=topology_classes,
+        support_radius_voxels=1,
+    )
+
+    assert len(junctions) == 1
+    assert junctions[0].junction_type == "P-R"
+
+
 def test_compute_its_morphometry_counts_pairwise_junction_edges_within_cluster():
     full_labels = np.zeros((7, 7, 7), dtype=np.uint8)
     skeleton_labels = np.zeros_like(full_labels)

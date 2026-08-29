@@ -1,1 +1,2 @@
 include plate_rod_thinning/_c_backend.c
+include CHANGELOG.md

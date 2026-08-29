@@ -4,6 +4,33 @@
 
 The package ports the original MATLAB plate/rod workflow into Python while keeping the core algorithm outside the Slicer Bone Imaging Toolbox. It produces 1-voxel skeleton topology labels, full-thickness plate/rod/junction labels, individual full-thickness component labels, and summary morphometry metrics.
 
+## Method
+
+The default pipeline uses topology-preserving thinning followed by Saha/Stauber-style local skeleton classification. Final topology classes are decomposed into individual trabecular elements using an ITS-like graph workflow:
+
+1. classify skeleton voxels into surface, curve, and typed junction classes;
+2. dilate typed junction zones before element decomposition;
+3. label plate and rod components after junction-zone removal;
+4. reconstruct individual element labels back into the full-thickness trabecular mask;
+5. count P-P, P-R, and R-R junctions from unique neighboring reconstructed element pairs.
+
+The current defaults provide a conservative decomposition for HR-pQCT-style trabecular masks:
+
+```python
+PlateRodParameters(
+    junction_dilation_voxels=2,
+    min_plate_voxels=0,
+    min_rod_voxels=5,
+    junction_support_radius_voxels=None,
+)
+```
+
+`junction_support_radius_voxels` is available for experiments that require reconstructed junctions to be spatially supported by matching typed skeleton junction classes. It is disabled by default because this package treats the reconstructed element graph as the primary output.
+
+## Validation Notes
+
+The defaults were checked on an HR-pQCT II tibia test case to confirm that the outputs are numerically plausible and internally consistent for trabecular bone analysis. This package implements an open, auditable plate/rod thinning and graph morphometry workflow; it is not intended to be a bitwise or parameter-matched clone of any proprietary ITS implementation.
+
 ## Install
 
 ```bash

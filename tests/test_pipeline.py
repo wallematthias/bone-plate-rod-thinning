@@ -58,7 +58,11 @@ def test_label_full_thickness_uses_backend_propagation(monkeypatch) -> None:
 
 
 def test_default_parameters_remove_tiny_rod_fragments() -> None:
-    assert PlateRodParameters().min_rod_voxels == 3
+    params = PlateRodParameters()
+    assert params.min_plate_voxels == 0
+    assert params.min_rod_voxels == 5
+    assert params.junction_dilation_voxels == 2
+    assert params.junction_support_radius_voxels is None
 
 
 def test_plate_rod_analysis_returns_named_outputs_and_summary_statistics() -> None:

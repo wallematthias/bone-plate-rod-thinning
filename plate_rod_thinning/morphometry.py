@@ -7,7 +7,15 @@ from itertools import combinations, product
 import numpy as np
 from scipy import ndimage as ndi
 
-from plate_rod_thinning.classification import ARC_ARC_JUNCTION, SURFACE_CURVE_JUNCTION, SURFACE_SURFACE_JUNCTION
+from plate_rod_thinning.classification import (
+    ARC_ARC_JUNCTION,
+    ARC_ENDPOINT,
+    ARC_INNER,
+    SURFACE_CURVE_JUNCTION,
+    SURFACE_ENDPOINT,
+    SURFACE_INNER,
+    SURFACE_SURFACE_JUNCTION,
+)
 from plate_rod_thinning.backend import propagate_labels_6_connected
 
 
@@ -64,6 +72,10 @@ def compute_its_morphometry(
     topology_classes: np.ndarray | None = None,
     analysis_mask: np.ndarray,
     voxel_spacing_mm: tuple[float, float, float] | None = None,
+    junction_dilation_voxels: int = 0,
+    min_plate_voxels: int = 0,
+    min_rod_voxels: int = 0,
+    junction_support_radius_voxels: int | None = None,
 ) -> ITSMorphometry:
     """Measure ITS-style plate/rod components and typed junction densities."""
     full = np.asarray(full_labels, dtype=np.uint8)
@@ -80,7 +92,13 @@ def compute_its_morphometry(
     tv_voxels = int(tissue.sum())
     tv_mm3 = tv_voxels * voxel_volume
 
-    skeleton_element_labels, element_types, skeleton_junction_labels, graph_junctions = _skeleton_graph_elements(skeleton, topology)
+    skeleton_element_labels, element_types, skeleton_junction_labels, graph_junctions = _skeleton_graph_elements(
+        skeleton,
+        topology,
+        junction_dilation_voxels=junction_dilation_voxels,
+        min_plate_voxels=min_plate_voxels,
+        min_rod_voxels=min_rod_voxels,
+    )
     component_labels = _full_thickness_element_labels(full, skeleton_element_labels)
     element_count = int(len(element_types) - 1)
 
@@ -97,7 +115,16 @@ def compute_its_morphometry(
     )
 
     junction_labels = skeleton_junction_labels.astype(np.int32, copy=False)
-    junctions = _graph_junctions_to_trabecula_junctions(graph_junctions, voxel_volume)
+    if junction_dilation_voxels or min_plate_voxels or min_rod_voxels:
+        junctions = _component_neighbor_pair_junctions(
+            component_labels,
+            element_types,
+            voxel_volume,
+            topology_classes=topology if junction_support_radius_voxels is not None else None,
+            support_radius_voxels=junction_support_radius_voxels or 0,
+        )
+    else:
+        junctions = _graph_junctions_to_trabecula_junctions(graph_junctions, voxel_volume)
 
     plate_components = tuple(component for component in components if component.component_type == "plate")
     rod_components = tuple(component for component in components if component.component_type == "rod")
@@ -224,15 +251,40 @@ def _measure_components(
 def _skeleton_graph_elements(
     skeleton_labels: np.ndarray,
     topology_classes: np.ndarray | None = None,
+    *,
+    junction_dilation_voxels: int = 0,
+    min_plate_voxels: int = 0,
+    min_rod_voxels: int = 0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, tuple[GraphJunction, ...]]:
+    if junction_dilation_voxels < 0:
+        raise ValueError("junction_dilation_voxels must be non-negative")
+    if min_plate_voxels < 0 or min_rod_voxels < 0:
+        raise ValueError("minimum component sizes must be non-negative")
+
     skeleton = np.asarray(skeleton_labels, dtype=np.uint8)
     structure = np.ones((3, 3, 3), dtype=bool)
     element_labels = np.zeros(skeleton.shape, dtype=np.int32)
     element_type_chunks = [np.asarray([0], dtype=np.uint8)]
     next_element_id = 1
+    plate_mask, rod_mask = _decomposition_element_masks(skeleton, topology_classes)
+    junction_mask = skeleton == JUNCTION
+    if topology_classes is not None:
+        topology = np.asarray(topology_classes, dtype=np.uint8)
+        junction_mask = (
+            (topology == SURFACE_SURFACE_JUNCTION)
+            | (topology == SURFACE_CURVE_JUNCTION)
+            | (topology == ARC_ARC_JUNCTION)
+        ) & (skeleton > 0)
+    if junction_dilation_voxels and np.any(junction_mask):
+        junction_zone = ndi.binary_dilation(junction_mask, structure=_ball_structure(junction_dilation_voxels))
+        plate_mask &= ~junction_zone
+        rod_mask &= ~junction_zone
 
-    for element_type in (PLATE, ROD):
-        labels, count = ndi.label(skeleton == element_type, structure=structure)
+    plate_mask = _remove_small_components(plate_mask, min_plate_voxels, structure)
+    rod_mask = _remove_small_components(rod_mask, min_rod_voxels, structure)
+
+    for element_type, element_mask in ((PLATE, plate_mask), (ROD, rod_mask)):
+        labels, count = ndi.label(element_mask, structure=structure)
         if count:
             mask = labels > 0
             element_labels[mask] = labels[mask] + next_element_id - 1
@@ -242,6 +294,39 @@ def _skeleton_graph_elements(
     element_types = np.concatenate(element_type_chunks)
     junction_labels, junctions = _typed_junction_clusters(skeleton, topology_classes, element_labels, element_types, structure)
     return element_labels, element_types, junction_labels.astype(np.int32), junctions
+
+
+def _decomposition_element_masks(
+    skeleton: np.ndarray,
+    topology_classes: np.ndarray | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    if topology_classes is None:
+        return skeleton == PLATE, skeleton == ROD
+    topology = np.asarray(topology_classes, dtype=np.uint8)
+    active = skeleton > 0
+    unknown = topology == 0
+    plate = (((topology == SURFACE_ENDPOINT) | (topology == SURFACE_INNER)) | (unknown & (skeleton == PLATE))) & active
+    rod = (((topology == ARC_ENDPOINT) | (topology == ARC_INNER)) | (unknown & (skeleton == ROD))) & active
+    return plate, rod
+
+
+def _remove_small_components(mask: np.ndarray, minimum_size: int, structure: np.ndarray) -> np.ndarray:
+    if minimum_size <= 1:
+        return np.asarray(mask, dtype=bool)
+    labels, count = ndi.label(mask, structure=structure)
+    if count == 0:
+        return np.asarray(mask, dtype=bool)
+    counts = np.bincount(labels.ravel(), minlength=count + 1)
+    keep = counts >= minimum_size
+    keep[0] = False
+    return keep[labels]
+
+
+def _ball_structure(radius: int) -> np.ndarray:
+    coords = np.indices((2 * radius + 1, 2 * radius + 1, 2 * radius + 1), dtype=float)
+    center = float(radius)
+    squared_distance = np.sum((coords - center) ** 2, axis=0)
+    return squared_distance <= float(radius * radius)
 
 
 def _typed_junction_clusters(
@@ -328,6 +413,104 @@ def _typed_graph_junctions(
     return tuple(junctions)
 
 
+def _component_neighbor_pair_junctions(
+    component_labels: np.ndarray,
+    element_types: np.ndarray,
+    voxel_volume: float,
+    *,
+    topology_classes: np.ndarray | None = None,
+    support_radius_voxels: int = 0,
+) -> tuple[TrabeculaJunction, ...]:
+    labels = np.asarray(component_labels, dtype=np.int32)
+    pair_keys: set[int] = set()
+    stride = int(len(element_types))
+    support_masks = _junction_support_masks(topology_classes, support_radius_voxels)
+    for offset in _POSITIVE_OFFSETS_26:
+        center_slices, neighbor_slices = _neighbor_pair_slices(labels.shape, offset)
+        left = labels[center_slices]
+        right = labels[neighbor_slices]
+        touching = (left > 0) & (right > 0) & (left != right)
+        if not np.any(touching):
+            continue
+        left_touch = left[touching]
+        right_touch = right[touching]
+        if support_masks is not None:
+            supported = np.zeros(left_touch.shape, dtype=bool)
+            for support_type, support_mask in support_masks.items():
+                support = support_mask[center_slices][touching] | support_mask[neighbor_slices][touching]
+                if not np.any(support):
+                    continue
+                supported |= support & _pair_type_mask(left_touch, right_touch, element_types, support_type)
+            if not np.any(supported):
+                continue
+            left_touch = left_touch[supported]
+            right_touch = right_touch[supported]
+
+        first = np.minimum(left_touch, right_touch).astype(np.int64, copy=False)
+        second = np.maximum(left_touch, right_touch).astype(np.int64, copy=False)
+        pair_keys.update(int(key) for key in np.unique(first * stride + second))
+
+    junctions: list[TrabeculaJunction] = []
+    for junction_id, pair_key in enumerate(sorted(pair_keys), start=1):
+        first = int(pair_key // stride)
+        second = int(pair_key % stride)
+        first_type = int(element_types[first])
+        second_type = int(element_types[second])
+        plate_components = tuple(component_id for component_id, element_type in ((first, first_type), (second, second_type)) if element_type == PLATE)
+        rod_components = tuple(component_id for component_id, element_type in ((first, first_type), (second, second_type)) if element_type == ROD)
+        junctions.append(
+            TrabeculaJunction(
+                junction_id=int(junction_id),
+                junction_type=_junction_type(plate_components, rod_components),
+                plate_components=plate_components,
+                rod_components=rod_components,
+                voxel_count=0,
+                volume_mm3=0.0 * voxel_volume,
+            )
+        )
+    return tuple(junctions)
+
+
+def _junction_support_masks(
+    topology_classes: np.ndarray | None,
+    support_radius_voxels: int,
+) -> dict[str, np.ndarray] | None:
+    if topology_classes is None:
+        return None
+    if support_radius_voxels < 0:
+        raise ValueError("support_radius_voxels must be non-negative")
+    topology = np.asarray(topology_classes, dtype=np.uint8)
+    masks = {
+        "P-P": topology == SURFACE_SURFACE_JUNCTION,
+        "P-R": topology == SURFACE_CURVE_JUNCTION,
+        "R-R": topology == ARC_ARC_JUNCTION,
+    }
+    if support_radius_voxels == 0:
+        return masks
+    structure = _ball_structure(support_radius_voxels)
+    return {
+        junction_type: ndi.binary_dilation(mask, structure=structure) if np.any(mask) else mask
+        for junction_type, mask in masks.items()
+    }
+
+
+def _pair_type_mask(
+    left: np.ndarray,
+    right: np.ndarray,
+    element_types: np.ndarray,
+    junction_type: str,
+) -> np.ndarray:
+    left_types = element_types[left]
+    right_types = element_types[right]
+    if junction_type == "P-P":
+        return (left_types == PLATE) & (right_types == PLATE)
+    if junction_type == "P-R":
+        return ((left_types == PLATE) & (right_types == ROD)) | ((left_types == ROD) & (right_types == PLATE))
+    if junction_type == "R-R":
+        return (left_types == ROD) & (right_types == ROD)
+    return np.zeros(left.shape, dtype=bool)
+
+
 def _junction_type(plate_elements: tuple[int, ...], rod_elements: tuple[int, ...]) -> str:
     if plate_elements and rod_elements:
         return "P-R"
@@ -378,15 +561,8 @@ def _measure_graph_components(
         element_type = int(element_types[element_id])
         if element_type not in (PLATE, ROD):
             continue
-        if element_type == PLATE:
-            voxel_count = int(plate_voxels[element_id])
-            thickness_sum = float(plate_thickness[element_id])
-        else:
-            voxel_count = int(rod_voxels[element_id])
-            thickness_sum = float(rod_thickness[element_id])
-        if voxel_count == 0:
-            voxel_count = int(element_voxels[element_id])
-            thickness_sum = float(element_thickness[element_id])
+        voxel_count = int(element_voxels[element_id])
+        thickness_sum = float(element_thickness[element_id])
         principal_axis, axial_alignment = axes[element_id]
         components.append(
             TrabeculaComponent(
