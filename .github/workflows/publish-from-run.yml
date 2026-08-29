@@ -1,0 +1,71 @@
+name: Publish From Existing Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_ids:
+        description: "Comma or whitespace separated run IDs containing wheel and sdist artifacts"
+        required: true
+        type: string
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  publish:
+    name: Publish existing artifacts
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    environment:
+      name: pypi
+      url: https://pypi.org/p/plate-rod-thinning
+
+    steps:
+      - name: Download artifacts from source runs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_RUN_IDS: ${{ inputs.source_run_ids }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist artifact-zips
+          normalized_ids="$(printf '%s\n' "${SOURCE_RUN_IDS}" | tr ',;' '  ')"
+          for run_id in ${normalized_ids}; do
+            echo "Inspecting artifacts from run ${run_id}"
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" --paginate \
+              --jq '.artifacts[] | select(.expired == false and (.name == "sdist" or (.name | startswith("wheels-")))) | [.id, .name] | @tsv' \
+              > "artifact-zips/${run_id}.tsv"
+            if [[ ! -s "artifact-zips/${run_id}.tsv" ]]; then
+              echo "No active wheel/sdist artifacts found for run ${run_id}" >&2
+              exit 1
+            fi
+            while IFS=$'\t' read -r artifact_id artifact_name; do
+              zip_path="artifact-zips/${run_id}-${artifact_name}.zip"
+              echo "Downloading ${artifact_name} (${artifact_id})"
+              gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > "${zip_path}"
+              unzip -o "${zip_path}" -d dist
+            done < "artifact-zips/${run_id}.tsv"
+          done
+
+      - name: Set up Python for package checks
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Debug artifact inventory
+        run: |
+          ls -lah dist
+          ls -1 dist/*.whl
+          ls -1 dist/*.tar.gz
+
+      - name: Twine check
+        run: |
+          python -m pip install --upgrade pip twine
+          python -m twine check dist/*
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          verbose: true
