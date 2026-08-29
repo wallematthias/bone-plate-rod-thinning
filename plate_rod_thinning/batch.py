@@ -115,7 +115,7 @@ def run_plate_rod_batch(
     manifest = DerivativeManifest.create(
         _FAMILY,
         root,
-        {"name": "plate-rod-thinning", "version": "0.1.3"},
+        {"name": "plate-rod-thinning", "version": "0.1.4"},
         all_records,
     )
     if not dry_run:
