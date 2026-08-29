@@ -29,7 +29,7 @@ class PlateRodParameters:
 
     slenderness: int = 0
     min_plate_voxels: int = 0
-    min_rod_voxels: int = 0
+    min_rod_voxels: int = 3
     skeletonize: bool = True
     crop_to_mask: bool = True
     max_iterations: int = 200
@@ -117,6 +117,7 @@ def plate_rod_analysis(
     its = compute_its_morphometry(
         full_labels=full_labels,
         skeleton_labels=skeleton_labels,
+        topology_classes=topology_classes,
         analysis_mask=tissue_mask,
         voxel_spacing_mm=params.voxel_spacing_mm,
     )

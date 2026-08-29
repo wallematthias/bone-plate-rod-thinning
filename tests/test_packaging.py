@@ -11,7 +11,7 @@ def test_project_metadata_matches_slicer_import_expectations() -> None:
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
     assert pyproject["project"]["name"] == "plate-rod-thinning"
-    assert pyproject["project"]["version"] == "0.1.1"
+    assert pyproject["project"]["version"] == "0.1.2"
     assert pyproject["project"]["readme"] == "README.md"
     assert (ROOT / "README.md").exists()
     assert "numpy" in pyproject["project"]["dependencies"]

@@ -3,6 +3,11 @@ import pytest
 
 import plate_rod_thinning.morphometry as morphometry
 from plate_rod_thinning.morphometry import compute_its_morphometry
+from plate_rod_thinning.classification import (
+    ARC_ARC_JUNCTION,
+    SURFACE_CURVE_JUNCTION,
+    SURFACE_SURFACE_JUNCTION,
+)
 
 
 def test_compute_its_morphometry_reports_all_standard_its_summary_metrics():
@@ -71,6 +76,62 @@ def test_compute_its_morphometry_counts_typed_junction_densities():
     assert result.summary["R-R Junc.D"] == 0.0
     assert len(result.junctions) == 1
     assert result.junctions[0].junction_type == "P-R"
+
+
+def test_compute_its_morphometry_preserves_original_topology_junction_types():
+    full_labels = np.zeros((5, 9, 5), dtype=np.uint8)
+    skeleton_labels = np.zeros_like(full_labels)
+    topology_classes = np.zeros_like(full_labels)
+    skeleton_labels[2, 1:3, 2] = 1
+    skeleton_labels[2, 3, 2] = 3
+    skeleton_labels[2, 4:6, 2] = 1
+    topology_classes[2, 3, 2] = SURFACE_SURFACE_JUNCTION
+    skeleton_labels[2, 6, 2] = 3
+    skeleton_labels[2, 7:9, 2] = 2
+    topology_classes[2, 6, 2] = SURFACE_CURVE_JUNCTION
+    skeleton_labels[1, 7, 2] = 3
+    skeleton_labels[0, 7, 2] = 2
+    topology_classes[1, 7, 2] = ARC_ARC_JUNCTION
+    full_labels[skeleton_labels > 0] = skeleton_labels[skeleton_labels > 0]
+    analysis_mask = np.ones_like(full_labels, dtype=bool)
+
+    result = compute_its_morphometry(
+        full_labels=full_labels,
+        skeleton_labels=skeleton_labels,
+        topology_classes=topology_classes,
+        analysis_mask=analysis_mask,
+        voxel_spacing_mm=(1.0, 1.0, 1.0),
+    )
+
+    assert result.summary["P-P Junc.D"] == pytest.approx(1 / full_labels.size)
+    assert result.summary["P-R Junc.D"] == pytest.approx(1 / full_labels.size)
+    assert result.summary["R-R Junc.D"] == pytest.approx(1 / full_labels.size)
+
+
+def test_compute_its_morphometry_counts_pairwise_junction_edges_within_cluster():
+    full_labels = np.zeros((7, 7, 7), dtype=np.uint8)
+    skeleton_labels = np.zeros_like(full_labels)
+    skeleton_labels[1:3, 3, 3] = 1
+    skeleton_labels[4:6, 3, 3] = 1
+    skeleton_labels[3, 1:3, 3] = 2
+    skeleton_labels[3, 4:6, 3] = 2
+    skeleton_labels[3, 3, 3] = 3
+    full_labels[skeleton_labels > 0] = skeleton_labels[skeleton_labels > 0]
+    analysis_mask = np.ones_like(full_labels, dtype=bool)
+
+    result = compute_its_morphometry(
+        full_labels=full_labels,
+        skeleton_labels=skeleton_labels,
+        analysis_mask=analysis_mask,
+        voxel_spacing_mm=(1.0, 1.0, 1.0),
+    )
+
+    assert result.summary["P-P Junc.D"] == pytest.approx(1 / 343)
+    assert result.summary["P-R Junc.D"] == pytest.approx(4 / 343)
+    assert result.summary["R-R Junc.D"] == pytest.approx(1 / 343)
+    assert [junction.junction_type for junction in result.junctions].count("P-P") == 1
+    assert [junction.junction_type for junction in result.junctions].count("P-R") == 4
+    assert [junction.junction_type for junction in result.junctions].count("R-R") == 1
 
 
 def test_skeleton_graph_elements_type_plate_rod_and_plate_plate_junctions():

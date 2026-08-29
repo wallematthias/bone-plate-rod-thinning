@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from itertools import product
+from itertools import combinations, product
 
 import numpy as np
 from scipy import ndimage as ndi
 
+from plate_rod_thinning.classification import ARC_ARC_JUNCTION, SURFACE_CURVE_JUNCTION, SURFACE_SURFACE_JUNCTION
 from plate_rod_thinning.backend import propagate_labels_6_connected
 
 
@@ -59,6 +61,7 @@ def compute_its_morphometry(
     *,
     full_labels: np.ndarray,
     skeleton_labels: np.ndarray,
+    topology_classes: np.ndarray | None = None,
     analysis_mask: np.ndarray,
     voxel_spacing_mm: tuple[float, float, float] | None = None,
 ) -> ITSMorphometry:
@@ -68,13 +71,16 @@ def compute_its_morphometry(
     tissue = np.asarray(analysis_mask, dtype=bool)
     if full.shape != skeleton.shape or full.shape != tissue.shape:
         raise ValueError("full_labels, skeleton_labels, and analysis_mask must have the same shape")
+    topology = None if topology_classes is None else np.asarray(topology_classes, dtype=np.uint8)
+    if topology is not None and topology.shape != skeleton.shape:
+        raise ValueError("topology_classes must have the same shape as skeleton_labels")
 
     spacing = tuple(float(value) for value in (voxel_spacing_mm or (1.0, 1.0, 1.0)))
     voxel_volume = float(np.prod(spacing))
     tv_voxels = int(tissue.sum())
     tv_mm3 = tv_voxels * voxel_volume
 
-    skeleton_element_labels, element_types, skeleton_junction_labels, graph_junctions = _skeleton_graph_elements(skeleton)
+    skeleton_element_labels, element_types, skeleton_junction_labels, graph_junctions = _skeleton_graph_elements(skeleton, topology)
     component_labels = _full_thickness_element_labels(full, skeleton_element_labels)
     element_count = int(len(element_types) - 1)
 
@@ -217,10 +223,10 @@ def _measure_components(
 
 def _skeleton_graph_elements(
     skeleton_labels: np.ndarray,
+    topology_classes: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, tuple[GraphJunction, ...]]:
     skeleton = np.asarray(skeleton_labels, dtype=np.uint8)
     structure = np.ones((3, 3, 3), dtype=bool)
-    junction_labels, junction_count = ndi.label(skeleton == JUNCTION, structure=structure)
     element_labels = np.zeros(skeleton.shape, dtype=np.int32)
     element_type_chunks = [np.asarray([0], dtype=np.uint8)]
     next_element_id = 1
@@ -234,8 +240,50 @@ def _skeleton_graph_elements(
             next_element_id += count
 
     element_types = np.concatenate(element_type_chunks)
-    junctions = _typed_graph_junctions(junction_labels, junction_count, element_labels, element_types)
+    junction_labels, junctions = _typed_junction_clusters(skeleton, topology_classes, element_labels, element_types, structure)
     return element_labels, element_types, junction_labels.astype(np.int32), junctions
+
+
+def _typed_junction_clusters(
+    skeleton: np.ndarray,
+    topology_classes: np.ndarray | None,
+    element_labels: np.ndarray,
+    element_types: np.ndarray,
+    structure: np.ndarray,
+) -> tuple[np.ndarray, tuple[GraphJunction, ...]]:
+    if topology_classes is None:
+        junction_labels, junction_count = ndi.label(skeleton == JUNCTION, structure=structure)
+        return (
+            junction_labels.astype(np.int32),
+            _typed_graph_junctions(junction_labels, junction_count, element_labels, element_types),
+        )
+
+    topology = np.asarray(topology_classes, dtype=np.uint8)
+    typed_masks = (
+        ("P-P", topology == SURFACE_SURFACE_JUNCTION),
+        ("P-R", topology == SURFACE_CURVE_JUNCTION),
+        ("R-R", topology == ARC_ARC_JUNCTION),
+    )
+    combined_labels = np.zeros(skeleton.shape, dtype=np.int32)
+    all_junctions: list[GraphJunction] = []
+    next_junction_id = 1
+    for forced_type, mask in typed_masks:
+        local_labels, local_count = ndi.label(mask & (skeleton == JUNCTION), structure=structure)
+        if local_count == 0:
+            continue
+        active = local_labels > 0
+        combined_labels[active] = local_labels[active] + next_junction_id - 1
+        local_junctions = _typed_graph_junctions(
+            local_labels,
+            local_count,
+            element_labels,
+            element_types,
+            forced_type=forced_type,
+            first_junction_id=next_junction_id,
+        )
+        all_junctions.extend(local_junctions)
+        next_junction_id += local_count
+    return combined_labels, tuple(all_junctions)
 
 
 def _typed_graph_junctions(
@@ -243,6 +291,9 @@ def _typed_graph_junctions(
     junction_count: int,
     element_labels: np.ndarray,
     element_types: np.ndarray,
+    *,
+    forced_type: str | None = None,
+    first_junction_id: int = 1,
 ) -> tuple[GraphJunction, ...]:
     if junction_count == 0:
         return ()
@@ -264,10 +315,11 @@ def _typed_graph_junctions(
         neighbors = element_neighbors[junction_id]
         plate_elements = tuple(sorted(element_id for element_id in neighbors if element_types[element_id] == PLATE))
         rod_elements = tuple(sorted(element_id for element_id in neighbors if element_types[element_id] == ROD))
+        global_junction_id = first_junction_id + junction_id - 1
         junctions.append(
             GraphJunction(
-                junction_id=int(junction_id),
-                junction_type=_junction_type(plate_elements, rod_elements),
+                junction_id=int(global_junction_id),
+                junction_type=forced_type or _junction_type(plate_elements, rod_elements),
                 plate_elements=plate_elements,
                 rod_elements=rod_elements,
                 voxel_count=int(voxel_counts[junction_id]),
@@ -356,17 +408,42 @@ def _graph_junctions_to_trabecula_junctions(
     graph_junctions: tuple[GraphJunction, ...],
     voxel_volume: float,
 ) -> tuple[TrabeculaJunction, ...]:
-    return tuple(
-        TrabeculaJunction(
-            junction_id=junction.junction_id,
-            junction_type=junction.junction_type,
-            plate_components=junction.plate_elements,
-            rod_components=junction.rod_elements,
-            voxel_count=junction.voxel_count,
-            volume_mm3=junction.voxel_count * voxel_volume,
+    trabecula_junctions: list[TrabeculaJunction] = []
+    next_id = 1
+    for junction in graph_junctions:
+        for junction_type, plate_components, rod_components in _junction_component_edges(junction):
+            trabecula_junctions.append(
+                TrabeculaJunction(
+                    junction_id=next_id,
+                    junction_type=junction_type,
+                    plate_components=plate_components,
+                    rod_components=rod_components,
+                    voxel_count=junction.voxel_count,
+                    volume_mm3=junction.voxel_count * voxel_volume,
+                )
+            )
+            next_id += 1
+    return tuple(trabecula_junctions)
+
+
+def _junction_component_edges(
+    junction: GraphJunction,
+) -> Iterable[tuple[str, tuple[int, ...], tuple[int, ...]]]:
+    for left, right in combinations(junction.plate_elements, 2):
+        yield "P-P", (left, right), ()
+    for plate in junction.plate_elements:
+        for rod in junction.rod_elements:
+            yield "P-R", (plate,), (rod,)
+    for left, right in combinations(junction.rod_elements, 2):
+        yield "R-R", (), (left, right)
+    if not junction.plate_elements and not junction.rod_elements:
+        yield "untyped", (), ()
+    elif len(junction.plate_elements) + len(junction.rod_elements) == 1:
+        yield (
+            junction.junction_type,
+            junction.plate_elements,
+            junction.rod_elements,
         )
-        for junction in graph_junctions
-    )
 
 
 def _skeleton_plate_areas_by_label(

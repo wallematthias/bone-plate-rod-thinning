@@ -57,6 +57,10 @@ def test_label_full_thickness_uses_backend_propagation(monkeypatch) -> None:
     assert label_full_thickness(bone, seed_labels) is expected
 
 
+def test_default_parameters_remove_tiny_rod_fragments() -> None:
+    assert PlateRodParameters().min_rod_voxels == 3
+
+
 def test_plate_rod_analysis_returns_named_outputs_and_summary_statistics() -> None:
     bone = np.zeros((7, 7, 7), dtype=bool)
     bone[3, 3, 1:6] = True
