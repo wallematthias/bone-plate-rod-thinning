@@ -41,7 +41,7 @@ def initial_classes_from_keys(keys: np.ndarray) -> np.ndarray:
 def propagate_labels_6_connected(bone: np.ndarray, seed_labels: np.ndarray) -> np.ndarray:
     """Propagate seed labels through a 6-connected binary bone mask."""
     bone_mask = np.asarray(bone, dtype=np.bool_)
-    labels = np.asarray(seed_labels, dtype=np.uint8)
+    labels = np.asarray(seed_labels, dtype=np.int32)
     if bone_mask.shape != labels.shape:
         raise ValueError("bone and seed_labels must have the same shape")
     if _c_backend is not None and hasattr(_c_backend, "propagate_labels_6_connected"):
@@ -71,7 +71,7 @@ def _use_metal_full() -> bool:
 def _propagate_labels_6_connected_python(bone_mask: np.ndarray, seed_labels: np.ndarray) -> np.ndarray:
     from collections import deque
 
-    output = np.zeros(bone_mask.shape, dtype=np.uint8)
+    output = np.zeros(bone_mask.shape, dtype=np.int32)
     queue: deque[tuple[int, int, int]] = deque()
     for coord in zip(*np.nonzero(seed_labels), strict=False):
         if not bone_mask[coord]:

@@ -11,12 +11,26 @@ def test_project_metadata_matches_slicer_import_expectations() -> None:
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
     assert pyproject["project"]["name"] == "plate-rod-thinning"
-    assert pyproject["project"]["version"] == "0.1.0"
+    assert pyproject["project"]["version"] == "0.1.1"
     assert pyproject["project"]["readme"] == "README.md"
     assert (ROOT / "README.md").exists()
     assert "numpy" in pyproject["project"]["dependencies"]
     assert "scipy" in pyproject["project"]["dependencies"]
     assert "scikit-image" not in pyproject["project"]["dependencies"]
+
+
+def test_readme_includes_plate_rod_network_graph_citation() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    audit = (ROOT / "docs" / "algorithm_audit.md").read_text(encoding="utf-8")
+    combined = f"{readme}\n{audit}"
+
+    assert "## Citation" in readme
+    assert "Walle M, Yeritsyan D, Abbasian M, Oftadeh R, Müller R, Nazarian A." in combined
+    assert "A graph model to describe the network connectivity of trabecular plates and rods." in combined
+    assert "Front Bioeng Biotechnol. 2024 May 6;12:1384280." in combined
+    assert "10.3389/fbioe.2024.1384280" in combined
+    assert "PMID: 38770275" in combined
+    assert "PMCID: PMC11103010" in combined
 
 
 def test_public_repository_does_not_embed_local_private_paths() -> None:

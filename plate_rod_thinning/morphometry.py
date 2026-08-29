@@ -6,6 +6,8 @@ from itertools import product
 import numpy as np
 from scipy import ndimage as ndi
 
+from plate_rod_thinning.backend import propagate_labels_6_connected
+
 
 PLATE = 1
 ROD = 2
@@ -36,6 +38,15 @@ class TrabeculaJunction:
 
 
 @dataclass(frozen=True)
+class GraphJunction:
+    junction_id: int
+    junction_type: str
+    plate_elements: tuple[int, ...]
+    rod_elements: tuple[int, ...]
+    voxel_count: int
+
+
+@dataclass(frozen=True)
 class ITSMorphometry:
     component_labels: np.ndarray
     components: tuple[TrabeculaComponent, ...]
@@ -63,26 +74,24 @@ def compute_its_morphometry(
     tv_voxels = int(tissue.sum())
     tv_mm3 = tv_voxels * voxel_volume
 
-    plate_labels, plate_count = ndi.label(full == PLATE, structure=np.ones((3, 3, 3), dtype=bool))
-    rod_labels, rod_count = ndi.label(full == ROD, structure=np.ones((3, 3, 3), dtype=bool))
-    component_labels = np.zeros(full.shape, dtype=np.int32)
-    component_labels[plate_labels > 0] = plate_labels[plate_labels > 0]
-    component_labels[rod_labels > 0] = rod_labels[rod_labels > 0] + plate_count
+    skeleton_element_labels, element_types, skeleton_junction_labels, graph_junctions = _skeleton_graph_elements(skeleton)
+    component_labels = _full_thickness_element_labels(full, skeleton_element_labels)
+    element_count = int(len(element_types) - 1)
 
     thickness = 2.0 * ndi.distance_transform_edt(full > 0, sampling=spacing)
-    components = _measure_components(
-        plate_labels=plate_labels,
-        rod_labels=rod_labels,
-        plate_count=plate_count,
-        rod_count=rod_count,
+    components = _measure_graph_components(
+        component_labels=component_labels,
+        skeleton_element_labels=skeleton_element_labels,
+        element_types=element_types,
         skeleton=skeleton,
+        full=full,
         thickness=thickness,
         spacing=spacing,
         voxel_volume=voxel_volume,
     )
 
-    junction_labels, junction_count = ndi.label(full == JUNCTION, structure=np.ones((3, 3, 3), dtype=bool))
-    junctions = _measure_junctions(junction_labels, junction_count, plate_labels, rod_labels, plate_count, voxel_volume)
+    junction_labels = skeleton_junction_labels.astype(np.int32, copy=False)
+    junctions = _graph_junctions_to_trabecula_junctions(graph_junctions, voxel_volume)
 
     plate_components = tuple(component for component in components if component.component_type == "plate")
     rod_components = tuple(component for component in components if component.component_type == "rod")
@@ -94,6 +103,7 @@ def compute_its_morphometry(
         "plate_count": int(len(plate_components)),
         "rod_count": int(len(rod_components)),
         "junction_count": int(len(junctions)),
+        "skeleton_graph_element_count": element_count,
         "pTb.N": _number_density(len(plate_components), tv_mm3),
         "rTb.N": _number_density(len(rod_components), tv_mm3),
         "PR.N": _safe_divide(_number_density(len(plate_components), tv_mm3), _number_density(len(rod_components), tv_mm3)),
@@ -203,6 +213,180 @@ def _measure_components(
             )
         )
     return tuple(components)
+
+
+def _skeleton_graph_elements(
+    skeleton_labels: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, tuple[GraphJunction, ...]]:
+    skeleton = np.asarray(skeleton_labels, dtype=np.uint8)
+    structure = np.ones((3, 3, 3), dtype=bool)
+    junction_labels, junction_count = ndi.label(skeleton == JUNCTION, structure=structure)
+    element_labels = np.zeros(skeleton.shape, dtype=np.int32)
+    element_type_chunks = [np.asarray([0], dtype=np.uint8)]
+    next_element_id = 1
+
+    for element_type in (PLATE, ROD):
+        labels, count = ndi.label(skeleton == element_type, structure=structure)
+        if count:
+            mask = labels > 0
+            element_labels[mask] = labels[mask] + next_element_id - 1
+            element_type_chunks.append(np.full(count, element_type, dtype=np.uint8))
+            next_element_id += count
+
+    element_types = np.concatenate(element_type_chunks)
+    junctions = _typed_graph_junctions(junction_labels, junction_count, element_labels, element_types)
+    return element_labels, element_types, junction_labels.astype(np.int32), junctions
+
+
+def _typed_graph_junctions(
+    junction_labels: np.ndarray,
+    junction_count: int,
+    element_labels: np.ndarray,
+    element_types: np.ndarray,
+) -> tuple[GraphJunction, ...]:
+    if junction_count == 0:
+        return ()
+
+    element_neighbors: list[set[int]] = [set() for _ in range(junction_count + 1)]
+    for offset in _OFFSETS_26:
+        center_slices, neighbor_slices = _neighbor_pair_slices(junction_labels.shape, offset)
+        junction_view = junction_labels[center_slices]
+        element_view = element_labels[neighbor_slices]
+        neighbor_mask = (junction_view > 0) & (element_view > 0)
+        if np.any(neighbor_mask):
+            pairs = np.unique(np.column_stack((junction_view[neighbor_mask], element_view[neighbor_mask])), axis=0)
+            for junction_id, element_id in pairs:
+                element_neighbors[int(junction_id)].add(int(element_id))
+
+    voxel_counts = np.bincount(junction_labels.ravel(), minlength=junction_count + 1)
+    junctions: list[GraphJunction] = []
+    for junction_id in range(1, junction_count + 1):
+        neighbors = element_neighbors[junction_id]
+        plate_elements = tuple(sorted(element_id for element_id in neighbors if element_types[element_id] == PLATE))
+        rod_elements = tuple(sorted(element_id for element_id in neighbors if element_types[element_id] == ROD))
+        junctions.append(
+            GraphJunction(
+                junction_id=int(junction_id),
+                junction_type=_junction_type(plate_elements, rod_elements),
+                plate_elements=plate_elements,
+                rod_elements=rod_elements,
+                voxel_count=int(voxel_counts[junction_id]),
+            )
+        )
+    return tuple(junctions)
+
+
+def _junction_type(plate_elements: tuple[int, ...], rod_elements: tuple[int, ...]) -> str:
+    if plate_elements and rod_elements:
+        return "P-R"
+    if len(plate_elements) >= 2:
+        return "P-P"
+    if len(rod_elements) >= 2:
+        return "R-R"
+    return "untyped"
+
+
+def _full_thickness_element_labels(full: np.ndarray, skeleton_element_labels: np.ndarray) -> np.ndarray:
+    tissue = np.asarray(full) > 0
+    seeds = np.asarray(skeleton_element_labels, dtype=np.int32)
+    if not tissue.any() or not np.any(seeds):
+        return np.zeros(tissue.shape, dtype=np.int32)
+    return propagate_labels_6_connected(tissue, seeds).astype(np.int32, copy=False)
+
+
+def _measure_graph_components(
+    *,
+    component_labels: np.ndarray,
+    skeleton_element_labels: np.ndarray,
+    element_types: np.ndarray,
+    skeleton: np.ndarray,
+    full: np.ndarray,
+    thickness: np.ndarray,
+    spacing: tuple[float, float, float],
+    voxel_volume: float,
+) -> tuple[TrabeculaComponent, ...]:
+    element_count = int(len(element_types) - 1)
+    if element_count <= 0:
+        return ()
+
+    element_voxels = np.bincount(component_labels.ravel(), minlength=element_count + 1)
+    element_thickness = np.bincount(component_labels.ravel(), weights=thickness.ravel(), minlength=element_count + 1)
+    plate_component_labels = component_labels * (full == PLATE)
+    rod_component_labels = component_labels * (full == ROD)
+    plate_voxels = np.bincount(plate_component_labels.ravel(), minlength=element_count + 1)
+    rod_voxels = np.bincount(rod_component_labels.ravel(), minlength=element_count + 1)
+    plate_thickness = np.bincount(plate_component_labels.ravel(), weights=thickness.ravel(), minlength=element_count + 1)
+    rod_thickness = np.bincount(rod_component_labels.ravel(), weights=thickness.ravel(), minlength=element_count + 1)
+    skeleton_lengths = _skeleton_lengths_by_label(skeleton_element_labels, skeleton == ROD, element_count, spacing)
+    surface_areas = _skeleton_plate_areas_by_label(skeleton_element_labels, skeleton == PLATE, element_count, spacing)
+    axes = _principal_axes_by_label(component_labels, element_count, spacing)
+    components: list[TrabeculaComponent] = []
+
+    for element_id in range(1, element_count + 1):
+        element_type = int(element_types[element_id])
+        if element_type not in (PLATE, ROD):
+            continue
+        if element_type == PLATE:
+            voxel_count = int(plate_voxels[element_id])
+            thickness_sum = float(plate_thickness[element_id])
+        else:
+            voxel_count = int(rod_voxels[element_id])
+            thickness_sum = float(rod_thickness[element_id])
+        if voxel_count == 0:
+            voxel_count = int(element_voxels[element_id])
+            thickness_sum = float(element_thickness[element_id])
+        principal_axis, axial_alignment = axes[element_id]
+        components.append(
+            TrabeculaComponent(
+                component_id=int(element_id),
+                component_type="plate" if element_type == PLATE else "rod",
+                voxel_count=voxel_count,
+                volume_mm3=voxel_count * voxel_volume,
+                thickness_mm=_safe_divide(thickness_sum, voxel_count),
+                surface_area_mm2=float(surface_areas[element_id]) if element_type == PLATE else 0.0,
+                length_mm=float(skeleton_lengths[element_id]) if element_type == ROD else 0.0,
+                principal_axis=principal_axis,
+                axial_alignment=axial_alignment,
+            )
+        )
+    return tuple(components)
+
+
+def _graph_junctions_to_trabecula_junctions(
+    graph_junctions: tuple[GraphJunction, ...],
+    voxel_volume: float,
+) -> tuple[TrabeculaJunction, ...]:
+    return tuple(
+        TrabeculaJunction(
+            junction_id=junction.junction_id,
+            junction_type=junction.junction_type,
+            plate_components=junction.plate_elements,
+            rod_components=junction.rod_elements,
+            voxel_count=junction.voxel_count,
+            volume_mm3=junction.voxel_count * voxel_volume,
+        )
+        for junction in graph_junctions
+    )
+
+
+def _skeleton_plate_areas_by_label(
+    labels: np.ndarray,
+    plate_skeleton: np.ndarray,
+    label_count: int,
+    spacing: tuple[float, float, float],
+) -> np.ndarray:
+    areas = np.zeros(label_count + 1, dtype=float)
+    if label_count == 0:
+        return areas
+    voxel_area = float(np.prod(spacing) ** (2.0 / 3.0))
+    active_labels = np.asarray(labels, dtype=np.int32)[plate_skeleton]
+    if len(active_labels) == 0:
+        return areas
+    return np.bincount(
+        active_labels.ravel(),
+        weights=np.full(len(active_labels), voxel_area, dtype=float),
+        minlength=label_count + 1,
+    )
 
 
 def _surface_areas_by_label(labels: np.ndarray, label_count: int, spacing: tuple[float, float, float]) -> np.ndarray:

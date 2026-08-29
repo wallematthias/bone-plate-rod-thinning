@@ -32,6 +32,24 @@ def test_compute_its_morphometry_reports_all_standard_its_summary_metrics():
     assert "aBV/TV" in summary
 
 
+def test_compute_its_morphometry_reports_plate_surface_from_skeleton_mid_surface():
+    skeleton_labels = np.zeros((3, 4, 5), dtype=np.uint8)
+    skeleton_labels[1, 1:3, 1:4] = 1
+    full_labels = skeleton_labels.copy()
+    full_labels[0:3, 1:3, 1:4] = 1
+    analysis_mask = np.ones_like(full_labels, dtype=bool)
+
+    result = compute_its_morphometry(
+        full_labels=full_labels,
+        skeleton_labels=skeleton_labels,
+        analysis_mask=analysis_mask,
+        voxel_spacing_mm=(1.0, 1.0, 1.0),
+    )
+
+    assert result.summary["plate_count"] == 1
+    assert result.summary["pTb.S_mm2"] == pytest.approx(6.0)
+
+
 def test_compute_its_morphometry_counts_typed_junction_densities():
     full_labels = np.zeros((5, 7, 5), dtype=np.uint8)
     skeleton_labels = np.zeros_like(full_labels)
@@ -53,6 +71,46 @@ def test_compute_its_morphometry_counts_typed_junction_densities():
     assert result.summary["R-R Junc.D"] == 0.0
     assert len(result.junctions) == 1
     assert result.junctions[0].junction_type == "P-R"
+
+
+def test_skeleton_graph_elements_type_plate_rod_and_plate_plate_junctions():
+    labels = np.zeros((5, 7, 7), dtype=np.uint8)
+    labels[2, 1:3, 2] = 1
+    labels[2, 3, 2] = 3
+    labels[2, 4:6, 2] = 2
+    labels[2, 1:3, 5] = 1
+    labels[2, 3, 5] = 3
+    labels[2, 4:6, 5] = 1
+
+    element_labels, element_types, junction_labels, junctions = morphometry._skeleton_graph_elements(labels)
+
+    assert element_labels.max() == 4
+    assert sorted(element_types[1:].tolist()) == [1, 1, 1, 2]
+    assert junction_labels.max() == 2
+    assert [junction.junction_type for junction in junctions] == ["P-R", "P-P"]
+
+
+def test_compute_its_morphometry_keeps_rods_split_by_graph_junction_when_full_labels_touch():
+    skeleton_labels = np.zeros((3, 7, 3), dtype=np.uint8)
+    skeleton_labels[1, 1:3, 1] = 2
+    skeleton_labels[1, 3, 1] = 3
+    skeleton_labels[1, 4:6, 1] = 2
+    full_labels = skeleton_labels.copy()
+    full_labels[1, 3, 1] = 2
+    analysis_mask = np.ones_like(full_labels, dtype=bool)
+
+    result = compute_its_morphometry(
+        full_labels=full_labels,
+        skeleton_labels=skeleton_labels,
+        analysis_mask=analysis_mask,
+        voxel_spacing_mm=(1.0, 1.0, 1.0),
+    )
+
+    rod_ids = sorted({int(value) for value in np.unique(result.component_labels[full_labels > 0]) if value})
+    assert len(rod_ids) == 2
+    assert result.summary["rod_count"] == 2
+    assert result.summary["R-R Junc.D"] == pytest.approx(1 / full_labels.size)
+    assert result.summary["rTb.l_mm"] == pytest.approx(1.0)
 
 
 def test_compute_its_morphometry_measures_junctions_without_per_junction_full_volume_shift(monkeypatch):

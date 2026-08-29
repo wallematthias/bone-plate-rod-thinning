@@ -16,6 +16,12 @@ Prebuilt macOS wheels include the compiled C backend when available. The package
 export PLATE_ROD_USE_METAL_FULL=1
 ```
 
+## Citation
+
+If you use the plate/rod network connectivity or morphometry workflow, please cite:
+
+Walle M, Yeritsyan D, Abbasian M, Oftadeh R, Müller R, Nazarian A. A graph model to describe the network connectivity of trabecular plates and rods. Front Bioeng Biotechnol. 2024 May 6;12:1384280. doi: 10.3389/fbioe.2024.1384280. PMID: 38770275; PMCID: PMC11103010.
+
 ## Development
 
 The compiled extension is opt-in for local source builds:

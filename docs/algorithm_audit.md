@@ -27,6 +27,7 @@ Primary intended sources named by the MATLAB code and thesis:
 - P. K. Saha, B. B. Chaudhuri, D. Dutta Majumder. "A new shape preserving parallel thinning algorithm for 3D digital images." Pattern Recognition 30(12), 1939-1955, 1997. DOI: `10.1016/S0031-3203(97)00016-2`.
 - P. K. Saha, B. B. Chaudhuri. "3D Digital Topology under Binary Transformation with Applications." Computer Vision and Image Understanding 63(3), 418-429, 1996. DOI: `10.1006/cviu.1996.0032`.
 - M. Stauber, R. Muller. "Volumetric spatial decomposition of trabecular bone into rods and plates--A new method for local bone morphometry." Bone 38, 475-484, 2006. DOI: `10.1016/j.bone.2005.09.019`.
+- Walle M, Yeritsyan D, Abbasian M, Oftadeh R, Müller R, Nazarian A. "A graph model to describe the network connectivity of trabecular plates and rods." Front Bioeng Biotechnol. 2024 May 6;12:1384280. DOI: `10.3389/fbioe.2024.1384280`. PMID: `38770275`; PMCID: `PMC11103010`.
 - T. M. Bernard, A. Manzanera. "Improved Low Complexity Fully Parallel Thinning Algorithm." ICIAP 1999.
 - M. J. E. Golay. "Hexagonal Parallel Pattern Transformations." IEEE Transactions on Computers C-18(8), 733-740, 1969.
 

@@ -67,6 +67,20 @@ def test_backend_full_thickness_labels_match_reference_wavefront():
     )
 
 
+def test_backend_full_thickness_label_propagation_preserves_int32_element_ids():
+    bone = np.ones((1, 5, 1), dtype=bool)
+    seed_labels = np.zeros(bone.shape, dtype=np.int32)
+    seed_labels[0, 0, 0] = 301
+    seed_labels[0, 4, 0] = 612
+
+    labels = backend.propagate_labels_6_connected(bone, seed_labels)
+
+    assert labels.dtype == np.int32
+    assert labels[0, 0, 0] == 301
+    assert labels[0, 4, 0] == 612
+    assert set(np.unique(labels)) == {301, 612}
+
+
 def test_compiled_backend_exposes_full_thickness_label_propagation_when_available():
     if backend._c_backend is not None:
         assert hasattr(backend._c_backend, "propagate_labels_6_connected")

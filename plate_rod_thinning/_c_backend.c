@@ -506,7 +506,7 @@ static PyObject *propagate_labels_6_connected(PyObject *self, PyObject *args) {
     }
 
     bone = (PyArrayObject *)PyArray_FROM_OTF(bone_obj, NPY_BOOL, NPY_ARRAY_IN_ARRAY);
-    labels = (PyArrayObject *)PyArray_FROM_OTF(labels_obj, NPY_UINT8, NPY_ARRAY_IN_ARRAY);
+    labels = (PyArrayObject *)PyArray_FROM_OTF(labels_obj, NPY_INT32, NPY_ARRAY_IN_ARRAY);
     if (bone == NULL || labels == NULL) {
         Py_XDECREF(bone);
         Py_XDECREF(labels);
@@ -524,7 +524,7 @@ static PyObject *propagate_labels_6_connected(PyObject *self, PyObject *args) {
         }
     }
 
-    out = (PyArrayObject *)PyArray_ZEROS(3, PyArray_DIMS(bone), NPY_UINT8, 0);
+    out = (PyArrayObject *)PyArray_ZEROS(3, PyArray_DIMS(bone), NPY_INT32, 0);
     if (out == NULL) {
         goto fail;
     }
@@ -540,8 +540,8 @@ static PyObject *propagate_labels_6_connected(PyObject *self, PyObject *args) {
     }
 
     npy_bool *bone_data = (npy_bool *)PyArray_DATA(bone);
-    npy_uint8 *label_data = (npy_uint8 *)PyArray_DATA(labels);
-    npy_uint8 *out_data = (npy_uint8 *)PyArray_DATA(out);
+    npy_int32 *label_data = (npy_int32 *)PyArray_DATA(labels);
+    npy_int32 *out_data = (npy_int32 *)PyArray_DATA(out);
     npy_intp head = 0;
     npy_intp tail = 0;
 
@@ -554,7 +554,7 @@ static PyObject *propagate_labels_6_connected(PyObject *self, PyObject *args) {
 
     while (head < tail) {
         npy_intp idx = queue[head++];
-        npy_uint8 label = out_data[idx];
+        npy_int32 label = out_data[idx];
         npy_intp x = idx / (sy * sz);
         npy_intp yz = idx - x * sy * sz;
         npy_intp y = yz / sz;
@@ -856,7 +856,7 @@ fail:
 static PyMethodDef methods[] = {
     {"neighborhood_keys_3x3_at", neighborhood_keys_3x3_at, METH_VARARGS, "Pack selected 3x3x3 neighborhoods."},
     {"initial_classes_from_keys", initial_classes_from_keys, METH_VARARGS, "Classify packed 3x3x3 neighborhoods into Saha initial classes."},
-    {"propagate_labels_6_connected", propagate_labels_6_connected, METH_VARARGS, "Propagate uint8 seed labels through a 6-connected binary mask."},
+    {"propagate_labels_6_connected", propagate_labels_6_connected, METH_VARARGS, "Propagate int32 seed labels through a 6-connected binary mask."},
     {"skeletonize_surface", skeletonize_surface, METH_VARARGS, "Run topology-preserving surface thinning."},
     {NULL, NULL, 0, NULL}
 };
