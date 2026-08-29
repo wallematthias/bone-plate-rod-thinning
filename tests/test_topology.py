@@ -31,8 +31,8 @@ from plate_rod_thinning.topology import (
 )
 
 requires_matlab_lookup_tables = pytest.mark.skipif(
-    not MATLAB_ROOT.exists(),
-    reason="MATLAB source lookup tables are local audit data and are not available in CI",
+    MATLAB_ROOT is None or not MATLAB_ROOT.exists(),
+    reason="set PLATE_ROD_MATLAB_ROOT to run local MATLAB lookup-table audits",
 )
 
 

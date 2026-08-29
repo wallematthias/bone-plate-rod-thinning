@@ -1,15 +1,14 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
 from scipy.io import loadmat
 
 
-MATLAB_ROOT = Path(
-    "/Volumes/COLD-STORAGE/2-Matthias/01-PROJECTS/02-HARVARD/EST.MOD/"
-    "CODE/MATLAB/matdevelopment"
-)
+_MATLAB_ROOT_ENV = os.environ.get("PLATE_ROD_MATLAB_ROOT")
+MATLAB_ROOT = Path(_MATLAB_ROOT_ENV).expanduser() if _MATLAB_ROOT_ENV else None
 
 CLASS_EFFECTIVE_POINT_COUNTS = {
     0: 0,
@@ -24,19 +23,26 @@ CLASS_EFFECTIVE_POINT_COUNTS = {
     9: 20,
 }
 
-_TABLE_PATHS = {
-    "classification": MATLAB_ROOT / "CI_Classification" / "lkt_data.mat",
-    "thinning": MATLAB_ROOT / "SK_Skeleton" / "lktsk_data.mat",
-}
+def _table_paths() -> dict[str, Path]:
+    if MATLAB_ROOT is None:
+        raise FileNotFoundError(
+            "MATLAB lookup-table audits require PLATE_ROD_MATLAB_ROOT to point "
+            "to the legacy matdevelopment directory."
+        )
+    return {
+        "classification": MATLAB_ROOT / "CI_Classification" / "lkt_data.mat",
+        "thinning": MATLAB_ROOT / "SK_Skeleton" / "lktsk_data.mat",
+    }
 
 
 def load_lookup_tables(kind: str) -> dict[int, np.ndarray]:
     """Load MATLAB lookup tables as class-id keyed NumPy arrays."""
-    if kind not in _TABLE_PATHS:
-        expected = ", ".join(sorted(_TABLE_PATHS))
+    table_paths = _table_paths()
+    if kind not in table_paths:
+        expected = ", ".join(sorted(table_paths))
         raise ValueError(f"unknown lookup table kind {kind!r}; expected {expected}")
 
-    raw = loadmat(_TABLE_PATHS[kind])
+    raw = loadmat(table_paths[kind])
     return {i: np.asarray(raw[f"class{i}"]) for i in range(10)}
 
 

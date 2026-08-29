@@ -4,9 +4,7 @@ Date: 2026-08-28
 
 ## Scope
 
-This note starts the audit for porting the MATLAB plate/rod skeletonization code in:
-
-`/Volumes/COLD-STORAGE/2-Matthias/01-PROJECTS/02-HARVARD/EST.MOD/CODE/MATLAB/matdevelopment`
+This note starts the audit for porting the legacy MATLAB plate/rod skeletonization code. Local lookup-table comparisons can be run by setting `PLATE_ROD_MATLAB_ROOT` to the legacy `matdevelopment` directory.
 
 The immediate goal is not to reproduce MATLAB `bwskel`. The goal is to port and improve the custom topology-preserving thinning path:
 
@@ -154,7 +152,7 @@ The first scaffold lives in:
 
 It currently verifies:
 
-- the MATLAB source tree and `.mat` lookup files are available;
+- the MATLAB source tree and `.mat` lookup files are available through `PLATE_ROD_MATLAB_ROOT`;
 - lookup table row counts match effective point counts;
 - s-point class examples match the MATLAB/Saha class scheme;
 - `delta=1` appears only in the class-0 all-six-s-points cavity case;

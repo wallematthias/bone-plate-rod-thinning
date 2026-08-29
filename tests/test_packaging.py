@@ -19,6 +19,19 @@ def test_project_metadata_matches_slicer_import_expectations() -> None:
     assert "scikit-image" not in pyproject["project"]["dependencies"]
 
 
+def test_public_repository_does_not_embed_local_private_paths() -> None:
+    forbidden_parts = ("Volumes", "COLD-STORAGE")
+    for path in ROOT.rglob("*"):
+        if path.is_dir() or ".git" in path.parts:
+            continue
+        if path == Path(__file__):
+            continue
+        if path.suffix in {".pyc", ".so"}:
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        assert not all(part in text for part in forbidden_parts)
+
+
 def test_compiled_backend_is_opt_in_for_slicer_safe_installs() -> None:
     setup_source = (ROOT / "setup.py").read_text(encoding="utf-8")
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
