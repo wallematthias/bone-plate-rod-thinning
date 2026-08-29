@@ -88,6 +88,10 @@ def run_plate_rod_batch(
             records.extend(reusable)
             _emit(progress, item.bone, "measure", "reused", "Reused compatible plate/rod derivative outputs")
             continue
+        if dry_run:
+            records.extend(expected_records)
+            _emit(progress, item.bone, "measure", "planned", "Planned plate/rod derivative outputs")
+            continue
         _emit(progress, item.bone, "measure", "started", "Running plate/rod morphometry")
         bone = _load_mask(item.bone.path)
         common = _load_mask(item.common_region.path) if item.common_region is not None else None

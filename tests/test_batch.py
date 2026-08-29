@@ -228,6 +228,27 @@ def test_run_plate_rod_batch_force_recomputes_existing_outputs(tmp_path: Path) -
     assert label.path.stat().st_mtime_ns != old_time_ns
 
 
+def test_run_plate_rod_batch_dry_run_does_not_run_analysis(tmp_path: Path, monkeypatch) -> None:
+    import plate_rod_thinning.batch as batch
+    from plate_rod_thinning.pipeline import PlateRodParameters
+
+    bone_path = tmp_path / "inputs" / "trab.npy"
+    bone_path.parent.mkdir(parents=True)
+    np.save(bone_path, _tiny_bone())
+    _write_segmentation_manifest(tmp_path, bone_path=bone_path)
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("dry-run must not execute plate_rod_analysis")
+
+    monkeypatch.setattr(batch, "plate_rod_analysis", fail_if_called)
+
+    result = batch.run_plate_rod_batch(tmp_path, parameters=PlateRodParameters(skeletonize=False), dry_run=True)
+
+    assert len(result.records) == 3
+    assert not (tmp_path / "derivatives" / "PlateRodMorphometry" / "manifest.json").exists()
+    assert not any(record.path.exists() for record in result.records)
+
+
 def test_run_plate_rod_batch_rejects_empty_dataset_without_writing_manifest(tmp_path: Path) -> None:
     from plate_rod_thinning.batch import run_plate_rod_batch
 
