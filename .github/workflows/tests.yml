@@ -75,8 +75,9 @@ jobs:
           PLATE_ROD_BUILD_EXT: "1"
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --no-cache-dir .
           python -m pip install pytest
+          python -m pip install --no-cache-dir -e .
+          python setup.py build_ext --inplace
 
       - name: Import compiled backend
         run: |

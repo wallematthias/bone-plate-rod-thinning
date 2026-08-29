@@ -67,3 +67,11 @@ def test_github_actions_can_publish_artifacts_from_existing_run() -> None:
     assert "actions/runs/${run_id}/artifacts" in workflow
     assert "twine check dist/*" in workflow
     assert "pypa/gh-action-pypi-publish@release/v1" in workflow
+
+
+def test_github_actions_compiled_smoke_builds_extension_in_checkout() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
+
+    assert 'PLATE_ROD_BUILD_EXT: "1"' in workflow
+    assert "python setup.py build_ext --inplace" in workflow
+    assert "import plate_rod_thinning._c_backend" in workflow
