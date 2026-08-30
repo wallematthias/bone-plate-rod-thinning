@@ -115,7 +115,7 @@ def run_plate_rod_batch(
     manifest = DerivativeManifest.create(
         _FAMILY,
         root,
-        {"name": "plate-rod-thinning", "version": "0.1.4"},
+        {"name": "plate-rod-thinning", "version": "0.1.5"},
         all_records,
     )
     if not dry_run:
@@ -184,9 +184,13 @@ def _case_key(record: DerivativeRecord) -> tuple[str, str, str | None, int | Non
 
 
 def _load_mask(path: Path) -> np.ndarray:
-    if path.suffix != ".npy":
-        raise ValueError(f"Only .npy masks are supported by this batch workflow: {path}")
-    return np.asarray(np.load(path), dtype=bool)
+    if path.suffix == ".npy":
+        return np.asarray(np.load(path), dtype=bool)
+    if path.name.endswith((".nii", ".nii.gz")):
+        import SimpleITK as sitk
+
+        return sitk.GetArrayFromImage(sitk.ReadImage(str(path))) > 0
+    raise ValueError(f"Unsupported mask format for plate/rod batch workflow: {path}")
 
 
 def _output_records(

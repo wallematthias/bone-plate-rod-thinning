@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from plate_rod_thinning.classification import classify_skeleton_topology, plate_rod_labels_from_topology
-from plate_rod_thinning.morphometry import compute_its_morphometry
+from plate_rod_thinning.morphometry import ITSMorphometry, compute_its_morphometry
 from plate_rod_thinning.qa import component_summary, skeleton_degree
 from plate_rod_thinning.backend import propagate_labels_6_connected, skeletonize_surface
 
@@ -106,22 +106,55 @@ def plate_rod_analysis(
         if params.skeletonize
         else bone_mask.copy()
     )
-    topology_classes = classify_skeleton_topology(skeleton)
-    skeleton_labels = plate_rod_labels_from_topology(topology_classes)
+    if params.skeletonize:
+        topology_classes = classify_skeleton_topology(skeleton)
+        skeleton_labels = plate_rod_labels_from_topology(topology_classes)
+    else:
+        topology_classes = np.zeros(skeleton.shape, dtype=np.uint8)
+        skeleton_labels = classify_skeleton_preview(skeleton, slenderness=0)
     for _ in range(params.slenderness):
         skeleton_labels = _reduce_slender_plate_edges(skeleton_labels)
-    full_labels = label_full_thickness(bone_mask, skeleton_labels)
-    its = compute_its_morphometry(
-        full_labels=full_labels,
-        skeleton_labels=skeleton_labels,
-        topology_classes=topology_classes,
-        analysis_mask=tissue_mask,
-        voxel_spacing_mm=params.voxel_spacing_mm,
-        junction_dilation_voxels=params.junction_dilation_voxels,
-        min_plate_voxels=params.min_plate_voxels,
-        min_rod_voxels=params.min_rod_voxels,
-        junction_support_radius_voxels=params.junction_support_radius_voxels,
-    )
+    full_labels = label_full_thickness(bone_mask, skeleton_labels) if params.skeletonize else skeleton_labels.copy()
+    if params.skeletonize:
+        its = compute_its_morphometry(
+            full_labels=full_labels,
+            skeleton_labels=skeleton_labels,
+            topology_classes=topology_classes,
+            analysis_mask=tissue_mask,
+            voxel_spacing_mm=params.voxel_spacing_mm,
+            junction_dilation_voxels=params.junction_dilation_voxels,
+            min_plate_voxels=params.min_plate_voxels,
+            min_rod_voxels=params.min_rod_voxels,
+            junction_support_radius_voxels=params.junction_support_radius_voxels,
+        )
+    else:
+        its = ITSMorphometry(
+            component_labels=skeleton_labels.astype(np.int32, copy=False),
+            components=(),
+            junction_labels=np.zeros(skeleton_labels.shape, dtype=np.int32),
+            junctions=(),
+            summary={
+                "plate_count": 0,
+                "rod_count": 0,
+                "junction_count": 0,
+                "pTb.N": 0.0,
+                "rTb.N": 0.0,
+                "PR.N": 0.0,
+                "pTb.Th_mm": 0.0,
+                "rTb.Th_mm": 0.0,
+                "pTb.S_mm2": 0.0,
+                "rTb.l_mm": 0.0,
+                "P-P Junc.D": 0.0,
+                "P-R Junc.D": 0.0,
+                "R-R Junc.D": 0.0,
+                "aBV/TV": 0.0,
+                "mean_plate_axial_alignment": 0.0,
+                "mean_rod_axial_alignment": 0.0,
+                "measured_BV_mm3": 0.0,
+                "measured_pBV_mm3": 0.0,
+                "measured_rBV_mm3": 0.0,
+            },
+        )
     _, components = component_summary(skeleton_labels > 0)
     bone_voxels = int(bone_mask.sum())
     tissue_voxels = int(tissue_mask.sum())
@@ -136,7 +169,7 @@ def plate_rod_analysis(
     )
 
     summary.update({
-        "classifier": "saha_topology",
+        "classifier": "saha_topology" if params.skeletonize else "degree_preview",
         "bone_voxels": bone_voxels,
         "tissue_voxels": tissue_voxels,
         "skeleton_voxels": int(skeleton.sum()),

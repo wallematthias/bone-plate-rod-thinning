@@ -85,16 +85,31 @@ def test_plate_rod_analysis_returns_named_outputs_and_summary_statistics() -> No
     assert "rod_skeleton_voxels" in result.summary
 
 
-def test_plate_rod_analysis_uses_topological_classifier_not_degree_preview() -> None:
+def test_plate_rod_analysis_preview_mode_uses_degree_classifier() -> None:
     bone = np.zeros((5, 5, 5), dtype=bool)
     bone[2, 2, 1:4] = True
     params = PlateRodParameters(skeletonize=False)
 
     result = plate_rod_analysis(bone, parameters=params)
 
-    assert result.summary["classifier"] == "saha_topology"
+    assert result.summary["classifier"] == "degree_preview"
     assert result.skeleton_labels[2, 2, 2] == 2
     assert result.summary["rBV_voxels"] == 3
+
+
+def test_plate_rod_analysis_preview_mode_does_not_propagate_labels(monkeypatch) -> None:
+    import plate_rod_thinning.pipeline as pipeline
+
+    def fail_propagation(*_args, **_kwargs):
+        raise AssertionError("preview mode should not run full-thickness propagation")
+
+    monkeypatch.setattr(pipeline, "label_full_thickness", fail_propagation)
+    bone = np.zeros((5, 5, 5), dtype=bool)
+    bone[2, 2, 1:4] = True
+
+    result = pipeline.plate_rod_analysis(bone, parameters=PlateRodParameters(skeletonize=False))
+
+    assert result.summary["classifier"] == "degree_preview"
 
 
 def test_plate_rod_analysis_reports_plate_rod_volume_fractions_and_ratio() -> None:

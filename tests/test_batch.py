@@ -5,6 +5,7 @@ import sys
 
 import numpy as np
 import pytest
+import SimpleITK as sitk
 
 from bone_imaging_derivatives import DerivativeManifest, DerivativeRecord, read_manifest, write_manifest
 
@@ -82,6 +83,25 @@ def test_run_plate_rod_batch_discovers_manifest_masks_and_writes_derivative_outp
     assert "SAMPLE001" in table.read_text(encoding="utf-8")
 
 
+def test_run_plate_rod_batch_accepts_nifti_manifest_mask(tmp_path: Path) -> None:
+    from plate_rod_thinning.batch import run_plate_rod_batch
+    from plate_rod_thinning.pipeline import PlateRodParameters
+
+    bone = _tiny_bone()
+    bone_path = tmp_path / "inputs" / "sub-SAMPLE001_ses-1_site-tibia_mask-trabecular.nii.gz"
+    bone_path.parent.mkdir(parents=True)
+    sitk.WriteImage(sitk.GetImageFromArray(bone.astype(np.uint8)), str(bone_path))
+    _write_segmentation_manifest(tmp_path, bone_path=bone_path)
+
+    result = run_plate_rod_batch(
+        tmp_path,
+        parameters=PlateRodParameters(skeletonize=False),
+    )
+
+    assert len(result.records) == 3
+    assert all(record.path.exists() for record in result.records)
+
+
 def test_run_plate_rod_batch_clips_bone_before_plate_rod_analysis(tmp_path: Path) -> None:
     from plate_rod_thinning.batch import run_plate_rod_batch
     from plate_rod_thinning.pipeline import PlateRodParameters
@@ -129,7 +149,7 @@ def test_cli_run_batch_writes_plate_rod_manifest(tmp_path: Path) -> None:
     np.save(mask_path, np.pad(np.ones((1, 1, 3), dtype=bool), ((2, 2), (2, 2), (1, 1))))
 
     completed = subprocess.run(
-        [sys.executable, "-m", "plate_rod_thinning.cli", "run-batch", str(tmp_path)],
+        [sys.executable, "-m", "plate_rod_thinning.cli", "run-batch", str(tmp_path), "--no-skeletonize"],
         check=True,
         capture_output=True,
         text=True,

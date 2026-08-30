@@ -8,6 +8,7 @@ from pathlib import Path
 from bone_imaging_derivatives import format_progress_event
 
 from .batch import run_plate_rod_batch
+from .pipeline import PlateRodParameters
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -22,6 +23,11 @@ def build_parser() -> argparse.ArgumentParser:
     run_batch.add_argument("--force", action="store_true")
     run_batch.add_argument("--generate-missing", action="store_true")
     run_batch.add_argument("--no-common-region", action="store_true")
+    run_batch.add_argument(
+        "--no-skeletonize",
+        action="store_true",
+        help="skip thinning for fast preview/smoke runs; full analysis skeletonizes by default",
+    )
     return parser
 
 
@@ -37,6 +43,7 @@ def main(argv: list[str] | None = None) -> int:
             force=args.force,
             generate_missing=args.generate_missing,
             use_common_region=not args.no_common_region,
+            parameters=PlateRodParameters(skeletonize=not args.no_skeletonize),
             progress=lambda event: print(format_progress_event(event)),
         )
     return 0
