@@ -5,7 +5,6 @@ import sys
 
 import numpy as np
 import pytest
-import SimpleITK as sitk
 
 from bone_imaging_derivatives import DerivativeManifest, DerivativeRecord, read_manifest, write_manifest
 
@@ -87,6 +86,7 @@ def test_run_plate_rod_batch_accepts_nifti_manifest_mask(tmp_path: Path) -> None
     from plate_rod_thinning.batch import run_plate_rod_batch
     from plate_rod_thinning.pipeline import PlateRodParameters
 
+    sitk = pytest.importorskip("SimpleITK")
     bone = _tiny_bone()
     bone_path = tmp_path / "inputs" / "sub-SAMPLE001_ses-1_site-tibia_mask-trabecular.nii.gz"
     bone_path.parent.mkdir(parents=True)
