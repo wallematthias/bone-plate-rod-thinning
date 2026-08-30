@@ -75,7 +75,7 @@ jobs:
           PLATE_ROD_BUILD_EXT: "1"
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pytest setuptools wheel numpy scipy
+          python -m pip install pytest setuptools wheel numpy scipy bone-imaging-derivatives
           python -m pip install --no-cache-dir --no-deps -e .
           python setup.py build_ext --inplace
 
