@@ -1,6 +1,12 @@
+<p align="center">
+  <img src="resources/plate-rod-thinning.png" alt="plate-rod-thinning icon" width="240">
+</p>
+
 # plate-rod-thinning
 
 `plate-rod-thinning` provides topology-preserving trabecular bone plate/rod thinning and morphometry for HR-pQCT-style binary masks.
+
+Author: Matthias Walle.
 
 The package ports the original MATLAB plate/rod workflow into Python while keeping the core algorithm outside the Slicer Bone Imaging Toolbox. It produces 1-voxel skeleton topology labels, full-thickness plate/rod/junction labels, individual full-thickness component labels, and summary morphometry metrics.
 

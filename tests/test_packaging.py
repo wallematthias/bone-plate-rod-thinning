@@ -36,7 +36,12 @@ def test_readme_includes_plate_rod_network_graph_citation() -> None:
 def test_public_repository_does_not_embed_local_private_paths() -> None:
     forbidden_parts = ("Volumes", "COLD-STORAGE")
     for path in ROOT.rglob("*"):
-        if path.is_dir() or ".git" in path.parts:
+        if (
+            path.is_dir()
+            or ".git" in path.parts
+            or ".worktrees" in path.parts
+            or ".pytest_cache" in path.parts
+        ):
             continue
         if path == Path(__file__):
             continue
