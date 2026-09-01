@@ -4,14 +4,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "plate-rod-thinning"
-version = "0.1.3"
+version = "0.1.6"
 description = "Topology-preserving trabecular bone plate/rod skeletonization and morphometry."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "bone-imaging-derivatives",
   "numpy",
   "scipy",
 ]
+
+[project.scripts]
+plate-rod-thinning = "plate_rod_thinning.cli:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
