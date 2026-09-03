@@ -18,11 +18,13 @@ def build_parser() -> argparse.ArgumentParser:
     run_batch.add_argument("dataset_root", type=Path)
     run_batch.add_argument("--subject")
     run_batch.add_argument("--site")
+    run_batch.add_argument("--session")
     run_batch.add_argument("--output-root", type=Path)
     run_batch.add_argument("--dry-run", action="store_true")
     run_batch.add_argument("--force", action="store_true")
     run_batch.add_argument("--generate-missing", action="store_true")
     run_batch.add_argument("--no-common-region", action="store_true")
+    run_batch.add_argument("--require-common-region", action="store_true")
     run_batch.add_argument(
         "--no-skeletonize",
         action="store_true",
@@ -38,11 +40,13 @@ def main(argv: list[str] | None = None) -> int:
             args.dataset_root,
             subject_id=args.subject,
             site=args.site,
+            session_id=args.session,
             output_root=args.output_root,
             dry_run=args.dry_run,
             force=args.force,
             generate_missing=args.generate_missing,
             use_common_region=not args.no_common_region,
+            require_common_region=args.require_common_region,
             parameters=PlateRodParameters(skeletonize=not args.no_skeletonize),
             progress=lambda event: print(format_progress_event(event)),
         )

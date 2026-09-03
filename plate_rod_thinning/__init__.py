@@ -11,7 +11,7 @@ from plate_rod_thinning.pipeline import (
     label_full_thickness,
     plate_rod_analysis,
 )
-from plate_rod_thinning.batch import BatchWorkflowResult, run_plate_rod_batch
+from plate_rod_thinning.batch import BatchWorkflowResult, PlateRodBatchRow, discover_plate_rod_batch, run_plate_rod_batch
 
 __all__ = [
     "JUNCTION",
@@ -19,12 +19,14 @@ __all__ = [
     "PLATE",
     "ROD",
     "PlateRodParameters",
+    "PlateRodBatchRow",
     "PlateRodResult",
     "BatchWorkflowResult",
     "TrabeculaComponent",
     "TrabeculaJunction",
     "classify_skeleton_preview",
     "compute_its_morphometry",
+    "discover_plate_rod_batch",
     "label_full_thickness",
     "plate_rod_analysis",
     "run_plate_rod_batch",
