@@ -39,7 +39,7 @@ from .backend import backend_name
 
 _FAMILY = "PlateRodMorphometry"
 _MASK_ROLES = ("trabecular_mask", "bone_segmentation")
-_MASK_FAMILY_PRIORITY = {"ImportedContours": 0, "BoneContours": 1, "Segmentation": 2}
+_MASK_FAMILY_PRIORITY = {"IPLContours": 0, "ImportedContours": 1, "BoneContours": 2, "Segmentation": 3}
 _FILENAME = re.compile(
     r"(?:sub-(?P<subject>[^_]+)_)?(?:ses-(?P<session>[^_]+)_)?(?:site-(?P<site>[^_]+)_)?"
     r".*(?:trab(?:ecular)?|bone|seg).*\.npy$",
@@ -79,6 +79,7 @@ def discover_plate_rod_batch(dataset_root) -> tuple[PlateRodBatchRow, ...]:
         root = root.parent
     images = discover_raw_xct_images(root)
     contours = (
+        *discover_derivative_artifacts(root, "IPLContours"),
         *discover_derivative_artifacts(root, "ImportedContours"),
         *discover_derivative_artifacts(root, "BoneContours"),
     )
@@ -219,6 +220,12 @@ def _discover_inputs(
     for record in sorted(trab_records, key=_record_priority):
         trab_by_case.setdefault(_grouping_case_key(record), record)
     has_manifest_masks = bool(bone_by_case or trab_by_case)
+    for record in _shared_contour_records(root, subject_id=subject_id, site=site):
+        if record.role == "bone_segmentation":
+            bone_by_case.setdefault(_grouping_case_key(record), record)
+        elif record.role == "trabecular_mask":
+            trab_by_case.setdefault(_grouping_case_key(record), record)
+    has_manifest_masks = bool(bone_by_case or trab_by_case)
     fallback_records = _filename_fallback(root, subject_id=subject_id, site=site)
     for record in fallback_records:
         if has_manifest_masks and (record.subject_id == "unknown" or record.site == "unknown"):
@@ -250,6 +257,39 @@ def _discover_inputs(
         ) if use_common_region else None
         inputs.append(_BatchInput(bone, trab, common))
     return inputs
+
+
+def _shared_contour_records(root: Path, *, subject_id: str | None, site: str | None) -> list[DerivativeRecord]:
+    records: list[DerivativeRecord] = []
+    requested_subject = normalize_subject_id(subject_id) if subject_id is not None else None
+    requested_site = normalize_site(site) if site is not None else None
+    for family in ("IPLContours", "ImportedContours", "BoneContours"):
+        for artifact in discover_derivative_artifacts(root, family):
+            if artifact.role not in {"segmentation", "trab"}:
+                continue
+            if requested_subject is not None and artifact.key.subject_id != requested_subject:
+                continue
+            if requested_site is not None and artifact.key.voi != requested_site:
+                continue
+            role = "bone_segmentation" if artifact.role == "segmentation" else "trabecular_mask"
+            source = artifact.source if artifact.source in {"generated", "provided", "derived", "legacy", "virtual"} else "provided"
+            records.append(
+                DerivativeRecord(
+                    derivative=family,
+                    role=role,
+                    subject_id=artifact.key.subject_id,
+                    site=artifact.key.voi,
+                    session_id=artifact.key.session_id,
+                    stack_index=artifact.key.stack_index,
+                    space="native",
+                    path=artifact.path,
+                    source=source,
+                    content_type="mask",
+                    metadata=dict(artifact.metadata),
+                    record_id=f"{family}:{role}:{artifact.key.subject_id}:{artifact.key.voi}:{artifact.key.session_id}:{artifact.key.stack_index}:native",
+                )
+            )
+    return records
 
 
 def _filter_inputs(inputs: list[_BatchInput], *, session_id: str | None) -> list[_BatchInput]:
