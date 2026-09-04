@@ -11,7 +11,7 @@ def test_project_metadata_matches_slicer_import_expectations() -> None:
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
     assert pyproject["project"]["name"] == "plate-rod-thinning"
-    assert pyproject["project"]["version"] == "0.1.7"
+    assert pyproject["project"]["version"] == "0.1.8"
     assert pyproject["project"]["readme"] == "README.md"
     assert (ROOT / "README.md").exists()
     assert "numpy" in pyproject["project"]["dependencies"]
@@ -51,16 +51,27 @@ def test_public_repository_does_not_embed_local_private_paths() -> None:
         assert not all(part in text for part in forbidden_parts)
 
 
-def test_compiled_backend_is_opt_in_for_slicer_safe_installs() -> None:
+def test_compiled_backend_builds_by_default_for_release_installs() -> None:
     setup_source = (ROOT / "setup.py").read_text(encoding="utf-8")
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
 
     assert (ROOT / "plate_rod_thinning" / "_c_backend.c").exists()
-    assert 'PLATE_ROD_BUILD_EXT") != "1"' in setup_source
+    assert 'PLATE_ROD_BUILD_EXT", "1") == "0"' in setup_source
     assert '"plate_rod_thinning._c_backend"' in setup_source
     assert "numpy" in pyproject["build-system"]["requires"]
     assert "include plate_rod_thinning/_c_backend.c" in manifest
+
+
+def test_github_actions_publish_pypi_uses_trusted_publishing() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "publish-pypi.yml").read_text(encoding="utf-8")
+
+    assert "Publish To PyPI" in workflow
+    assert "python -m build" in workflow
+    assert "twine check dist/*" in workflow
+    assert "id-token: write" in workflow
+    assert "pypa/gh-action-pypi-publish@release/v1" in workflow
+    assert "https://pypi.org/p/plate-rod-thinning" in workflow
 
 
 def test_github_actions_build_macos_binary_wheels_for_slicer() -> None:

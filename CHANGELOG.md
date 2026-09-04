@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.8 - 2026-09-03
+
+### Changed
+
+- Build the compiled C backend by default for wheel and source installs. Set `PLATE_ROD_BUILD_EXT=0` only when a pure-Python fallback install is explicitly needed.
+
+### Added
+
+- Added a standard trusted-publishing workflow for PyPI releases.
+
 ## 0.1.3 - 2026-08-29
 
 ### Added

@@ -6,7 +6,7 @@ from setuptools import Extension, setup
 
 
 def extension_modules():
-    if os.environ.get("PLATE_ROD_BUILD_EXT") != "1":
+    if os.environ.get("PLATE_ROD_BUILD_EXT", "1") == "0":
         return []
     import numpy
 
