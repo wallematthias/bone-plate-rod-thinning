@@ -1,9 +1,8 @@
 name: Publish To PyPI
 
 on:
-  push:
-    tags:
-      - 'v*'
+  # Tag releases are published by build-wheels.yml, including macOS C wheels.
+  # Keep this workflow available for explicitly requested manual distributions.
   workflow_dispatch:
 
 env:

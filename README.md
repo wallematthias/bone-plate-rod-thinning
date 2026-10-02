@@ -57,9 +57,13 @@ Walle M, Yeritsyan D, Abbasian M, Oftadeh R, Müller R, Nazarian A. A graph mode
 
 ## Development
 
-The compiled extension is opt-in for local source builds:
+The compiled extension is built by default for wheels and local source builds:
 
 ```bash
-PLATE_ROD_BUILD_EXT=1 python -m pip install .
+python -m pip install .
 python -m pytest -q
 ```
+
+Set `PLATE_ROD_BUILD_EXT=0` only when a pure-Python fallback install is needed.
+
+Batch discovery recognizes shared `IPLContours`, `ImportedContours`, and `BoneContours` segmentation and trabecular masks, preserving subject/session/VOI/stack identities. See [CHANGELOG.md](CHANGELOG.md) for release notes.

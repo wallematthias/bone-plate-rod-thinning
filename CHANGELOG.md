@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.9 - 2026-10-02
+
+### Fixed
+
+- Discover shared IPLContours, ImportedContours, and BoneContours masks for batch analysis, including normalized AIM mask filenames and per-stack identities.
+- Prefer IPLContours before ImportedContours, BoneContours, and Segmentation when selecting batch masks.
+- Record the current package version in batch derivative manifests.
+
+### Changed
+
+- Use the existing macOS wheel workflow as the sole tag-triggered PyPI publisher, avoiding duplicate source uploads while retaining the manual distribution publisher.
+
 ## 0.1.8 - 2026-09-03
 
 ### Changed

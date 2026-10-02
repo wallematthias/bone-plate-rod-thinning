@@ -11,7 +11,7 @@ def test_project_metadata_matches_slicer_import_expectations() -> None:
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
     assert pyproject["project"]["name"] == "plate-rod-thinning"
-    assert pyproject["project"]["version"] == "0.1.8"
+    assert pyproject["project"]["version"] == "0.1.9"
     assert pyproject["project"]["readme"] == "README.md"
     assert (ROOT / "README.md").exists()
     assert "numpy" in pyproject["project"]["dependencies"]
@@ -72,6 +72,8 @@ def test_github_actions_publish_pypi_uses_trusted_publishing() -> None:
     assert "id-token: write" in workflow
     assert "pypa/gh-action-pypi-publish@release/v1" in workflow
     assert "https://pypi.org/p/plate-rod-thinning" in workflow
+    assert "workflow_dispatch:" in workflow
+    assert "\n  push:\n" not in workflow
 
 
 def test_github_actions_build_macos_binary_wheels_for_slicer() -> None:
