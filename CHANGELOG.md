@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+## 0.1.10 - 2026-10-09
+
+### Fixed
+
+- Add Windows AMD64 compiled wheels for Python 3.12 and 3.13 to the tag-triggered release workflow, so Slicer's binary-only installation can find a compatible distribution after release.
+- Test Windows source installs and compiled-backend parity in CI. Preserve existing macOS wheel builds and scientific defaults.
+
 ## 0.1.9 - 2026-10-02
 
 ### Fixed

@@ -22,6 +22,7 @@ jobs:
       matrix:
         os:
           - ubuntu-latest
+          - windows-latest
           - macos-15
           - macos-15-intel
         python-version:
@@ -54,6 +55,7 @@ jobs:
       fail-fast: false
       matrix:
         os:
+          - windows-latest
           - macos-15
           - macos-15-intel
         python-version:
@@ -80,11 +82,7 @@ jobs:
           python setup.py build_ext --inplace
 
       - name: Import compiled backend
-        run: |
-          python - <<'PY'
-          import plate_rod_thinning._c_backend as c_backend
-          print("compiled backend ok:", c_backend)
-          PY
+        run: python -c "import plate_rod_thinning._c_backend as c_backend; print('compiled backend ok:', c_backend)"
 
       - name: Run tests with compiled backend
         run: python -m pytest -q

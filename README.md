@@ -49,6 +49,11 @@ Prebuilt macOS wheels include the compiled C backend when available. The package
 export PLATE_ROD_USE_METAL_FULL=1
 ```
 
+The release workflow also builds Windows AMD64 compiled wheels for Python 3.12
+and 3.13. These become available only after a successful release; older PyPI
+versions may have macOS wheels only. Slicer's binary-only installer requires a
+wheel matching its Python version and platform.
+
 ## Citation
 
 If you use the plate/rod network connectivity or morphometry workflow, please cite:
